@@ -19,3 +19,8 @@ class FreeModelDtoOut(BaseModel):
             context_length=model.context_length,
             description=model.description,
         )
+
+
+class ModelStatusDtoOut(BaseModel):
+    model_id: str | None
+    available: bool

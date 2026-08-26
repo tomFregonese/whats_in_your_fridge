@@ -1,8 +1,8 @@
 """Fetches and caches OpenRouter's `:free` model catalog.
 
-Used by the model picker (Onboarding/Settings) today. A later milestone
-adds an availability check that reuses this same cache to warn the user if
-their chosen model disappears from the catalog.
+Used by the model picker (Onboarding/Settings) and the availability check
+(`is_model_available`, called defensively before generating suggestions
+and from `GET /api/settings/model-status` — see the project plan).
 """
 
 import time
@@ -58,6 +58,10 @@ def list_free_models(*, force_refresh: bool = False) -> list[FreeModel]:
     _cache = models
     _cache_expires_at = now + CACHE_TTL_SECONDS
     return models
+
+
+def is_model_available(model_id: str, *, force_refresh: bool = False) -> bool:
+    return any(model.id == model_id for model in list_free_models(force_refresh=force_refresh))
 
 
 def clear_cache() -> None:

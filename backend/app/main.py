@@ -9,6 +9,7 @@ from app.services.exceptions import (
     CatalogUnavailableError,
     InvalidPasswordError,
     ModelNotConfiguredError,
+    ModelUnavailableError,
     NotFoundError,
     NotOnboardedError,
     OpenRouterAuthError,
@@ -124,6 +125,11 @@ async def handle_agent_response_invalid(
 async def handle_model_not_configured(
     request: Request, exc: ModelNotConfiguredError
 ) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(ModelUnavailableError)
+async def handle_model_unavailable(request: Request, exc: ModelUnavailableError) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 

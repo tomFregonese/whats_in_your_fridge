@@ -70,3 +70,7 @@ class AgentResponseInvalidError(Exception):
 
 class ModelNotConfiguredError(Exception):
     """A suggestion was requested before an OpenRouter model was chosen."""
+
+
+class ModelUnavailableError(Exception):
+    """The configured OpenRouter model is no longer in the live `:free` catalog."""

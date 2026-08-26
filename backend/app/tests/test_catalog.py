@@ -68,3 +68,11 @@ def test_list_free_models_wraps_http_errors() -> None:
         pytest.raises(CatalogUnavailableError),
     ):
         catalog.list_free_models()
+
+
+def test_is_model_available_true_when_present(mock_get: MagicMock) -> None:
+    assert catalog.is_model_available("foo/bar:free") is True
+
+
+def test_is_model_available_false_when_absent(mock_get: MagicMock) -> None:
+    assert catalog.is_model_available("nope/nope:free") is False

@@ -1,14 +1,14 @@
 """Orchestrates one fridge-input submission end to end: persists the
 input, builds the agent's conversation (allergies, preferences, and a
-recent-meals dedup context — see `agent/dedup.py`), runs the tool-calling
-loop (allergy-checked — see `agent/allergy_check.py`), and persists
-`agent_run` state across clarification round-trips.
+recent-meals dedup context — see `agent/dedup.py`), defensively checks the
+configured model is still live before spending a request on it, runs the
+tool-calling loop (allergy-checked — see `agent/allergy_check.py`), and
+persists `agent_run` state across clarification round-trips.
 
-Not part of this milestone (see the project plan — later milestones add
-each of these around the same loop without changing its shape):
-model-availability check, and meal_plan/suggestion persistence (results
-are returned as-is, not saved yet — which also means `dedup_provider`
-currently always sees empty history until that persistence lands; see
+Not part of this milestone (see the project plan — a later milestone adds
+this without changing this service's shape): meal_plan/suggestion
+persistence (results are returned as-is, not saved yet — which also means
+`dedup_provider` currently always sees empty history; see
 `SuggestionRepository`'s docstring).
 """
 
@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.agent import loop, prompts
+from app.agent.catalog import is_model_available
 from app.agent.dedup import DedupProvider
 from app.domain.agent_run import AgentRun, AgentRunStatus
 from app.domain.fridge_input import FridgeInput
@@ -26,7 +27,11 @@ from app.persistence.repositories.allergy_repository import AllergyRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.preference_note_repository import PreferenceNoteRepository
 from app.security.service import SecurityService
-from app.services.exceptions import ModelNotConfiguredError, NotFoundError
+from app.services.exceptions import (
+    ModelNotConfiguredError,
+    ModelUnavailableError,
+    NotFoundError,
+)
 from app.services.settings_service import SettingsService
 
 
@@ -111,6 +116,11 @@ class SuggestionService:
         settings = self._settings_service.get_settings()
         if settings.openrouter_model_id is None:
             raise ModelNotConfiguredError("No OpenRouter model has been selected yet.")
+        if not is_model_available(settings.openrouter_model_id):
+            raise ModelUnavailableError(
+                f"'{settings.openrouter_model_id}' is no longer available in OpenRouter's "
+                "`:free` catalog — pick a different model in Settings."
+            )
 
         result = loop.run(
             token=token,

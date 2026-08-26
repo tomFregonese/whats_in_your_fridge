@@ -82,3 +82,53 @@ def test_list_free_models_filters_and_maps(client: TestClient) -> None:
             "description": None,
         }
     ]
+
+
+def test_model_status_before_onboarding_is_conflict(client: TestClient) -> None:
+    response = client.get("/api/settings/model-status")
+
+    assert response.status_code == 409
+
+
+def test_model_status_reports_no_model_when_none_selected(client: TestClient) -> None:
+    _onboard(client)
+
+    with patch("app.agent.catalog.httpx.get", return_value=_mock_catalog_response()):
+        response = client.get("/api/settings/model-status")
+
+    assert response.status_code == 200
+    assert response.json() == {"model_id": None, "available": False}
+
+
+def test_model_status_reports_available_when_model_in_catalog(client: TestClient) -> None:
+    _onboard(client)
+    with patch("app.agent.catalog.httpx.get", return_value=_mock_catalog_response()):
+        client.patch(
+            "/api/settings", json={"default_servings": 4, "openrouter_model_id": "foo/bar:free"}
+        )
+
+        response = client.get("/api/settings/model-status")
+
+    assert response.status_code == 200
+    assert response.json() == {"model_id": "foo/bar:free", "available": True}
+
+
+def test_model_status_reports_unavailable_when_model_dropped_from_catalog(
+    client: TestClient,
+) -> None:
+    _onboard(client)
+    with patch("app.agent.catalog.httpx.get", return_value=_mock_catalog_response()):
+        client.patch(
+            "/api/settings", json={"default_servings": 4, "openrouter_model_id": "foo/bar:free"}
+        )
+
+    # Catalog refreshed without `foo/bar:free` anymore (e.g. OpenRouter retired it).
+    narrower_payload = {"data": [{"id": "other/model:free", "name": "Other"}]}
+    narrower_response = MagicMock()
+    narrower_response.json.return_value = narrower_payload
+    narrower_response.raise_for_status.return_value = None
+    with patch("app.agent.catalog.httpx.get", return_value=narrower_response):
+        response = client.get("/api/settings/model-status")
+
+    assert response.status_code == 200
+    assert response.json() == {"model_id": "foo/bar:free", "available": False}

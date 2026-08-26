@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends
 
-from app.agent.catalog import list_free_models
+from app.agent.catalog import is_model_available, list_free_models
 from app.dependencies import get_security_service, get_settings_service
-from app.dto.model_dto import FreeModelDtoOut
+from app.dto.model_dto import FreeModelDtoOut, ModelStatusDtoOut
 from app.dto.settings_dto import SettingsDtoIn, SettingsDtoOut
 from app.security.service import SecurityService
 from app.services.settings_service import SettingsService
@@ -34,3 +34,12 @@ def update_settings(
 @router.get("/models")
 def get_free_models() -> list[FreeModelDtoOut]:
     return [FreeModelDtoOut.from_domain(model) for model in list_free_models()]
+
+
+@router.get("/model-status")
+def get_model_status(
+    settings_service: SettingsService = Depends(get_settings_service),
+) -> ModelStatusDtoOut:
+    model_id = settings_service.get_settings().openrouter_model_id
+    available = model_id is not None and is_model_available(model_id)
+    return ModelStatusDtoOut(model_id=model_id, available=available)

@@ -30,3 +30,12 @@ export function updateSettings(
 export function listFreeModels(): Promise<FreeModel[]> {
   return api.get<FreeModel[]>("/api/settings/models");
 }
+
+export interface ModelStatus {
+  model_id: string | null;
+  available: boolean;
+}
+
+export function getModelStatus(): Promise<ModelStatus> {
+  return api.get<ModelStatus>("/api/settings/model-status");
+}

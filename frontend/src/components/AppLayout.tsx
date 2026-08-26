@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
+import { ModelStatusBanner } from "./ModelStatusBanner";
 
 /** Persistent header + nav wrapping every screen behind `AppGate` (Home,
  * Settings, and whatever gets added in later milestones). Onboarding and
@@ -20,6 +21,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </nav>
         </div>
       </header>
+      <ModelStatusBanner />
       <main className="app-content">{children}</main>
     </div>
   );

@@ -92,7 +92,10 @@ def test_create_suggestions_rejects_unknown_mode(client: TestClient) -> None:
 def test_create_suggestions_returns_completed_result(client: TestClient) -> None:
     _setup(client)
 
-    with patch("app.services.suggestion_service.loop.run", return_value=_plats_proposed()):
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run", return_value=_plats_proposed()),
+    ):
         response = client.post(
             "/api/suggestions",
             json={"mode": "batch", "items": [{"ingredient_name": "carrot", "quantity_raw": "3"}]},
@@ -109,7 +112,10 @@ def test_create_suggestions_returns_completed_result(client: TestClient) -> None
 def test_create_suggestions_defaults_to_batch_mode(client: TestClient) -> None:
     _setup(client)
 
-    with patch("app.services.suggestion_service.loop.run", return_value=_plats_proposed()):
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run", return_value=_plats_proposed()),
+    ):
         response = client.post("/api/suggestions", json={"items": [{"ingredient_name": "egg"}]})
 
     assert response.status_code == 200
@@ -118,7 +124,10 @@ def test_create_suggestions_defaults_to_batch_mode(client: TestClient) -> None:
 def test_create_suggestions_returns_clarification_needed(client: TestClient) -> None:
     _setup(client)
 
-    with patch("app.services.suggestion_service.loop.run", return_value=_clarification()):
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run", return_value=_clarification()),
+    ):
         response = client.post(
             "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
         )
@@ -134,15 +143,21 @@ def test_create_suggestions_returns_clarification_needed(client: TestClient) -> 
 
 def test_respond_continues_the_conversation_and_appends_the_answer(client: TestClient) -> None:
     _setup(client)
-    with patch("app.services.suggestion_service.loop.run", return_value=_clarification()):
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run", return_value=_clarification()),
+    ):
         first = client.post(
             "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
         )
     run_id = first.json()["run_id"]
 
-    with patch(
-        "app.services.suggestion_service.loop.run", return_value=_plats_proposed()
-    ) as mock_run:
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch(
+            "app.services.suggestion_service.loop.run", return_value=_plats_proposed()
+        ) as mock_run,
+    ):
         response = client.post(
             f"/api/suggestions/runs/{run_id}/respond", json={"answer": "4 people"}
         )
@@ -180,3 +195,20 @@ def test_create_suggestions_requires_model_configured(client: TestClient) -> Non
     )
 
     assert response.status_code == 409
+
+
+def test_create_suggestions_returns_409_when_model_no_longer_available(
+    client: TestClient,
+) -> None:
+    _setup(client)
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=False),
+        patch("app.services.suggestion_service.loop.run") as mock_run,
+    ):
+        response = client.post(
+            "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
+        )
+
+    assert response.status_code == 409
+    mock_run.assert_not_called()
