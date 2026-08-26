@@ -1,26 +1,33 @@
-import { useEffect, useState } from "react";
-import { getHealth } from "./api/health";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { RequireOnboarding } from "./components/RequireOnboarding";
+import { Home } from "./pages/Home";
+import { Onboarding } from "./pages/Onboarding";
+import { Settings } from "./pages/Settings";
 import "./App.css";
 
-type ApiStatus = "checking" | "ok" | "unreachable";
-
 function App() {
-  const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
-
-  useEffect(() => {
-    getHealth()
-      .then(() => setApiStatus("ok"))
-      .catch(() => setApiStatus("unreachable"));
-  }, []);
-
   return (
-    <main className="shell">
-      <h1>What's in your fridge?</h1>
-      <p>Milestone 0 — skeleton wired up end to end.</p>
-      <p>
-        Backend API: <span className={`status status-${apiStatus}`}>{apiStatus}</span>
-      </p>
-    </main>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/onboarding" element={<Onboarding />} />
+        <Route
+          path="/"
+          element={
+            <RequireOnboarding>
+              <Home />
+            </RequireOnboarding>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <RequireOnboarding>
+              <Settings />
+            </RequireOnboarding>
+          }
+        />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
