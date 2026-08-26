@@ -21,7 +21,11 @@ def test_complete_onboarding_creates_settings_and_seeds_allergies_and_preference
     )
 
     assert response.status_code == 201
-    assert response.json() == {"default_servings": 4, "openrouter_model_id": None}
+    assert response.json() == {
+        "default_servings": 4,
+        "openrouter_model_id": None,
+        "openrouter_token_configured": False,
+    }
 
     assert client.get("/api/onboarding/status").json() == {"onboarded": True}
 
@@ -32,6 +36,21 @@ def test_complete_onboarding_creates_settings_and_seeds_allergies_and_preference
     assert len(preferences) == 1
     assert preferences[0]["content"] == "loves spicy food"
     assert preferences[0]["source"] == "onboarding"
+
+
+def test_complete_onboarding_bundles_chosen_model_id(client: TestClient) -> None:
+    response = client.post(
+        "/api/onboarding",
+        json={
+            "default_servings": 4,
+            "allergies": [],
+            "preference_notes": [],
+            "openrouter_model_id": "foo/bar:free",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["openrouter_model_id"] == "foo/bar:free"
 
 
 def test_onboarding_twice_is_rejected(client: TestClient) -> None:

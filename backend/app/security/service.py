@@ -1,10 +1,9 @@
-"""Setup/unlock/lock orchestration for the app password.
+"""Setup/unlock/lock orchestration for the app password, plus encrypting
+and decrypting the OpenRouter token.
 
 The only place outside `security/crypto.py` and `security/vault.py`
 allowed to touch `VaultEntity` directly — see `app.security`'s docstring
-for why this bypasses the usual Dto/BO/Entity triptyque. Encrypting/storing
-the OpenRouter token itself is added in a later milestone (once the token
-entry screen exists) — this milestone only builds the password mechanism.
+for why this bypasses the usual Dto/BO/Entity triptyque.
 """
 
 from datetime import UTC, datetime
@@ -13,7 +12,11 @@ from sqlmodel import Session
 
 from app.persistence.entities.vault_entity import VaultEntity
 from app.security import crypto, vault
-from app.services.exceptions import InvalidPasswordError, PasswordAlreadySetError
+from app.services.exceptions import (
+    InvalidPasswordError,
+    PasswordAlreadySetError,
+    TokenNotConfiguredError,
+)
 
 SINGLETON_ID = 1
 
@@ -71,3 +74,35 @@ class SecurityService:
 
     def lock(self) -> None:
         vault.clear()
+
+    def has_token(self) -> bool:
+        entity = self._session.get(VaultEntity, SINGLETON_ID)
+        return entity is not None and entity.openrouter_api_token_encrypted is not None
+
+    def set_token(self, token: str) -> None:
+        """Encrypts `token` with the currently unlocked key and persists it.
+        Raises `VaultLockedError` (via `vault.get_key()`) if locked.
+        """
+        key = vault.get_key()
+        entity = self._session.get(VaultEntity, SINGLETON_ID)
+        if entity is None:
+            # Can't happen in practice: `vault.get_key()` only ever
+            # succeeds after `setup_password`/`unlock`, both of which
+            # require this row to exist.
+            raise RuntimeError("Vault is unlocked but has no persisted row.")
+
+        entity.openrouter_api_token_encrypted = crypto.encrypt(key, token)
+        entity.updated_at = datetime.now(UTC)
+        self._session.add(entity)
+        self._session.commit()
+
+    def get_token(self) -> str:
+        """Decrypts and returns the stored OpenRouter token. Raises
+        `VaultLockedError` if locked, `TokenNotConfiguredError` if no token
+        has been set yet.
+        """
+        key = vault.get_key()
+        entity = self._session.get(VaultEntity, SINGLETON_ID)
+        if entity is None or entity.openrouter_api_token_encrypted is None:
+            raise TokenNotConfiguredError("No OpenRouter token has been configured yet.")
+        return crypto.decrypt(key, entity.openrouter_api_token_encrypted)

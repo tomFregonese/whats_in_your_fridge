@@ -3,6 +3,13 @@ from fastapi.testclient import TestClient
 PASSWORD = "correct horse battery staple"
 
 
+def _onboard(client: TestClient) -> None:
+    client.post(
+        "/api/onboarding",
+        json={"default_servings": 4, "allergies": [], "preference_notes": []},
+    )
+
+
 def test_auth_status_initially_not_set(client: TestClient) -> None:
     response = client.get("/api/auth/status")
 
@@ -56,3 +63,33 @@ def test_unlock_before_any_password_set_is_rejected(client: TestClient) -> None:
     response = client.post("/api/auth/unlock", json={"password": "anything"})
 
     assert response.status_code == 401
+
+
+def test_set_token_requires_unlocked_vault(client: TestClient) -> None:
+    response = client.post("/api/auth/token", json={"token": "sk-or-v1-secret"})
+
+    assert response.status_code == 423
+
+
+def test_set_token_after_password_setup_is_reflected_in_settings(client: TestClient) -> None:
+    client.post("/api/auth/setup", json={"password": PASSWORD})
+
+    response = client.post("/api/auth/token", json={"token": "sk-or-v1-secret"})
+    assert response.status_code == 204
+
+    _onboard(client)
+    assert client.get("/api/settings").json()["openrouter_token_configured"] is True
+
+
+def test_set_token_survives_lock_and_unlock(client: TestClient) -> None:
+    client.post("/api/auth/setup", json={"password": PASSWORD})
+    client.post("/api/auth/token", json={"token": "sk-or-v1-secret"})
+    _onboard(client)
+
+    client.post("/api/auth/lock")
+    # Configured status is readable even locked — it's a plain boolean on
+    # the entity, no decryption needed.
+    assert client.get("/api/settings").json()["openrouter_token_configured"] is True
+
+    client.post("/api/auth/unlock", json={"password": PASSWORD})
+    assert client.get("/api/settings").json()["openrouter_token_configured"] is True

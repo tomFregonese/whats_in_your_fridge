@@ -9,6 +9,7 @@ export interface OnboardingPayload {
   default_servings: number;
   allergies: string[];
   preference_notes: string[];
+  openrouter_model_id?: string;
 }
 
 export function getOnboardingStatus(): Promise<OnboardingStatus> {

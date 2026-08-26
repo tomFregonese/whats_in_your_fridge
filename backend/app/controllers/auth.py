@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.dependencies import get_security_service
-from app.dto.auth_dto import AuthStatusDtoOut, SetupPasswordDtoIn, UnlockDtoIn
+from app.dto.auth_dto import AuthStatusDtoOut, SetTokenDtoIn, SetupPasswordDtoIn, UnlockDtoIn
 from app.security.service import SecurityService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -36,3 +36,15 @@ def unlock(
 @router.post("/lock", status_code=204)
 def lock(service: SecurityService = Depends(get_security_service)) -> None:
     service.lock()
+
+
+@router.post("/token", status_code=204)
+def set_token(
+    dto: SetTokenDtoIn,
+    service: SecurityService = Depends(get_security_service),
+) -> None:
+    """Separate from `PATCH /api/settings` on purpose: the token belongs to
+    the vault, not to `settings`, and must be settable during the
+    "openrouter" onboarding step — before `settings` exists at all.
+    """
+    service.set_token(dto.token)

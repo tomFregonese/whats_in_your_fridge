@@ -14,6 +14,10 @@ class UnlockDtoIn(BaseModel):
     password: str = Field(min_length=1)
 
 
+class SetTokenDtoIn(BaseModel):
+    token: str = Field(min_length=1)
+
+
 class AuthStatusDtoOut(BaseModel):
     password_set: bool
     unlocked: bool

@@ -16,3 +16,7 @@ export function setupPassword(password: string): Promise<void> {
 export function unlock(password: string): Promise<void> {
   return api.post<void>("/api/auth/unlock", { password });
 }
+
+export function setToken(token: string): Promise<void> {
+  return api.post<void>("/api/auth/token", { token });
+}

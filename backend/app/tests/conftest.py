@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
+from app.agent import catalog
 from app.db import get_session
 from app.main import app
 
@@ -22,6 +23,15 @@ def reset_vault() -> Generator[None, None, None]:
     vault.clear()
     yield
     vault.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_catalog_cache() -> Generator[None, None, None]:
+    # Same reasoning as `reset_vault` — the catalog cache is also a
+    # deliberate module-level variable (see its docstring).
+    catalog.clear_cache()
+    yield
+    catalog.clear_cache()
 
 
 @pytest.fixture(name="session")

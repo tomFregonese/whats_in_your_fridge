@@ -5,10 +5,12 @@ from fastapi.responses import JSONResponse
 from app.controllers import allergies, auth, health, onboarding, preferences, settings
 from app.services.exceptions import (
     AlreadyOnboardedError,
+    CatalogUnavailableError,
     InvalidPasswordError,
     NotFoundError,
     NotOnboardedError,
     PasswordAlreadySetError,
+    TokenNotConfiguredError,
     VaultLockedError,
 )
 
@@ -57,6 +59,20 @@ async def handle_invalid_password(request: Request, exc: InvalidPasswordError) -
 @app.exception_handler(VaultLockedError)
 async def handle_vault_locked(request: Request, exc: VaultLockedError) -> JSONResponse:
     return JSONResponse(status_code=423, content={"detail": str(exc)})
+
+
+@app.exception_handler(TokenNotConfiguredError)
+async def handle_token_not_configured(
+    request: Request, exc: TokenNotConfiguredError
+) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@app.exception_handler(CatalogUnavailableError)
+async def handle_catalog_unavailable(
+    request: Request, exc: CatalogUnavailableError
+) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
 app.include_router(health.router, prefix="/api")

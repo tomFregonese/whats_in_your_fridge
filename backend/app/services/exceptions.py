@@ -29,3 +29,11 @@ class InvalidPasswordError(Exception):
 
 class VaultLockedError(Exception):
     """Something needed the encryption key before the vault was unlocked."""
+
+
+class TokenNotConfiguredError(Exception):
+    """The OpenRouter token was read before it had ever been set."""
+
+
+class CatalogUnavailableError(Exception):
+    """OpenRouter's model catalog couldn't be fetched."""

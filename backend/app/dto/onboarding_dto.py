@@ -19,13 +19,17 @@ class OnboardingDtoIn(BaseModel):
     default_servings: int = Field(gt=0)
     allergies: list[str] = Field(default_factory=list)
     preference_notes: list[str] = Field(default_factory=list)
+    # Chosen in the "openrouter" onboarding step, submitted here alongside
+    # everything else — `settings` doesn't exist yet at that earlier step,
+    # so it can't be persisted until this final call creates the row.
+    openrouter_model_id: str | None = None
 
     def to_settings(self) -> Settings:
         now = datetime.now(UTC)
         return Settings(
             id=None,
             default_servings=self.default_servings,
-            openrouter_model_id=None,
+            openrouter_model_id=self.openrouter_model_id,
             created_at=now,
             updated_at=now,
         )
