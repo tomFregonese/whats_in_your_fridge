@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node / frontend build
+node_modules/
+dist/
+
+# Local data (SQLite file, encryption artifacts) — never committed
+data/*
+!data/.gitkeep
+
+# Secrets
+.env
+
+# IDE
+.idea/
+.DS_Store

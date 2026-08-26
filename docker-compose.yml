@@ -1,0 +1,22 @@
+services:
+  api:
+    build: ./backend
+    environment:
+      DB_PATH: /data/fridge.db
+      HISTORY_WINDOW_N: ${HISTORY_WINDOW_N:-10}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    # No `ports:` here on purpose — the API is reachable only from the
+    # `frontend` service over Docker's internal network.
+
+  frontend:
+    build: ./frontend
+    ports:
+      # Bound to 127.0.0.1 explicitly, never 0.0.0.0 — this app must never
+      # be reachable from the network, only from the machine it runs on.
+      - "127.0.0.1:${APP_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

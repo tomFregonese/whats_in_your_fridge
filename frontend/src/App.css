@@ -1,0 +1,27 @@
+.shell {
+  max-width: 40rem;
+  margin: 4rem auto;
+  padding: 0 1.5rem;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  text-align: center;
+}
+
+.status {
+  font-weight: 600;
+}
+
+.status-checking {
+  color: #a16207;
+}
+
+.status-ok {
+  color: #15803d;
+}
+
+.status-unreachable {
+  color: #b91c1c;
+}
