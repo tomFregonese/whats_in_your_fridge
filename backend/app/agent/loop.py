@@ -2,13 +2,15 @@
 
 Calls the model with both tools and interprets the result: either a
 clarifying question (stop and wait for the user — see `ClarificationNeeded`)
-or a validated set of proposed dishes (`PlatsProposed`). Bounded retries
-handle the model producing malformed tool-call arguments or no tool call
-at all — a real, if uncommon, occurrence with `:free` models.
+or a validated, allergy-checked set of proposed dishes (`PlatsProposed`).
+Bounded retries handle the model producing malformed tool-call arguments,
+no tool call at all, or (see `agent/allergy_check.py`) a dish that
+violates a strict household allergy — a real, if uncommon, occurrence
+with `:free` models either way.
 
-Allergy checking and dedup context are NOT wired in here (see the project
-plan — later milestones add them as extra steps around this loop without
-changing its shape).
+Dedup context is NOT wired in here yet (see the project plan — a later
+milestone adds it as the "recent meals" part of the prompt, without
+changing this loop's shape).
 """
 
 import json
@@ -21,13 +23,16 @@ from openai.types.chat import (
 )
 from pydantic import ValidationError
 
-from app.agent import client
+from app.agent import allergy_check, client
 from app.agent.output_schema import DemanderPrecisionArgs, ProposerPlatsArgs
 from app.agent.tools import DEMANDER_PRECISION, PROPOSER_PLATS, build_tools
+from app.domain.allergy import Allergy
+from app.domain.suggestion import AllergyCheckStatus, Suggestion
 from app.services.exceptions import AgentResponseInvalidError
 
 # "Retries bornés" per the project plan — small on purpose: a `:free` model
-# that can't produce a valid tool call in 3 tries is unlikely to on a 4th.
+# that can't produce a valid, allergy-safe tool call in 3 tries is unlikely
+# to on a 4th.
 MAX_ATTEMPTS = 3
 
 
@@ -43,7 +48,8 @@ class ClarificationNeeded:
 
 @dataclass
 class PlatsProposed:
-    args: ProposerPlatsArgs
+    suggestions: list[Suggestion]
+    notes_generales: str | None
 
 
 LoopResult = ClarificationNeeded | PlatsProposed
@@ -54,11 +60,12 @@ def run(
     token: str,
     model: str,
     messages: list[ChatCompletionMessageParam],
+    allergies: list[Allergy],
 ) -> LoopResult:
     tools = build_tools()
     working_messages = list(messages)
 
-    for _attempt in range(MAX_ATTEMPTS):
+    for attempt in range(MAX_ATTEMPTS):
         message = client.complete_with_tools(
             token=token, model=model, messages=working_messages, tools=tools
         )
@@ -100,7 +107,40 @@ def run(
                 working_messages.append(_assistant_message(tool_call_param))
                 working_messages.append(_tool_error_message(tool_call.id, exc))
                 continue
-            return PlatsProposed(args=plats_args)
+
+            working_messages.append(_assistant_message(tool_call_param))
+            # Attempt > 0 here means at least one earlier round (JSON-
+            # invalid or allergy-violating) had to be corrected — everyone
+            # surviving this round is fairly labeled REGENERATED, not OK.
+            status = AllergyCheckStatus.OK if attempt == 0 else AllergyCheckStatus.REGENERATED
+
+            safe_plats, violations = allergy_check.check_all(plats_args.plats, allergies)
+
+            if not violations:
+                return PlatsProposed(
+                    suggestions=[
+                        plat.to_domain(allergy_check_status=status) for plat in safe_plats
+                    ],
+                    notes_generales=plats_args.notes_generales,
+                )
+
+            if attempt == MAX_ATTEMPTS - 1:
+                # Out of attempts — resolve now rather than erroring out:
+                # keep whatever's safe, drop the rest, and say so.
+                dropped_names = [violation.plat.nom for violation in violations]
+                note = _dropped_note(plats_args.notes_generales, dropped_names)
+                return PlatsProposed(
+                    suggestions=[
+                        plat.to_domain(allergy_check_status=AllergyCheckStatus.REGENERATED)
+                        for plat in safe_plats
+                    ],
+                    notes_generales=note,
+                )
+
+            working_messages.append(
+                _tool_error_message(tool_call.id, _violation_message(violations))
+            )
+            continue
 
         working_messages.append(_assistant_message(tool_call_param))
         working_messages.append(
@@ -112,6 +152,28 @@ def run(
     raise AgentResponseInvalidError(
         f"The model failed to produce a valid tool call after {MAX_ATTEMPTS} attempts."
     )
+
+
+def _violation_message(violations: list[allergy_check.Violation]) -> str:
+    details = "; ".join(f'"{v.plat.nom}" contains {v.allergen}' for v in violations)
+    return (
+        f"The following dish(es) violate a strict household allergy and cannot be shown: "
+        f"{details}. Call `proposer_plats` again with corrected dishes that avoid every "
+        "listed allergy entirely."
+    )
+
+
+def _dropped_note(existing_note: str | None, dropped_names: list[str]) -> str | None:
+    if not dropped_names:
+        return existing_note
+    names = ", ".join(f'"{name}"' for name in dropped_names)
+    plural = len(dropped_names) > 1
+    dropped_message = (
+        f"Note: {names} {'were' if plural else 'was'} removed because "
+        f"{'they' if plural else 'it'} conflicted with a listed allergy, even after asking "
+        "for a correction."
+    )
+    return f"{existing_note}\n\n{dropped_message}" if existing_note else dropped_message
 
 
 def _retry_nudge_message() -> ChatCompletionMessageParam:

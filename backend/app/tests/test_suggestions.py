@@ -3,7 +3,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.agent import loop
-from app.agent.output_schema import PlatArgs, PlatIngredient, ProposerPlatsArgs
+from app.domain.suggestion import AllergyCheckStatus, Suggestion
 
 PASSWORD = "correct horse battery staple"
 
@@ -24,18 +24,19 @@ def _setup(client: TestClient, *, with_model: bool = True) -> None:
 
 def _plats_proposed() -> loop.PlatsProposed:
     return loop.PlatsProposed(
-        args=ProposerPlatsArgs(
-            plats=[
-                PlatArgs(
-                    nom="Carrot soup",
-                    description="Simple soup",
-                    portions=4,
-                    ingredients=[PlatIngredient(nom="carrot", quantite="3")],
-                    etapes=["Boil.", "Blend."],
-                )
-            ],
-            notes_generales="Enjoy!",
-        )
+        suggestions=[
+            Suggestion(
+                id=None,
+                meal_plan_id=None,
+                dish_name="Carrot soup",
+                description="Simple soup",
+                ingredients_json='["carrot (3)"]',
+                steps_json='["Boil.", "Blend."]',
+                servings=4,
+                allergy_check_status=AllergyCheckStatus.OK,
+            )
+        ],
+        notes_generales="Enjoy!",
     )
 
 

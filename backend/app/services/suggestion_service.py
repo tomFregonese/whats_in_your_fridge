@@ -1,12 +1,13 @@
 """Orchestrates one fridge-input submission end to end: persists the
-input, builds the agent's conversation, runs the tool-calling loop, and
-persists `agent_run` state across clarification round-trips.
+input, builds the agent's conversation, runs the tool-calling loop
+(allergy-checked — see `agent/allergy_check.py`), and persists `agent_run`
+state across clarification round-trips.
 
 Not part of this milestone (see the project plan — later milestones add
 each of these around the same loop without changing its shape):
-allergy checking, dedup/recent-meals context, model-availability check,
-and meal_plan/suggestion persistence (results are returned as-is, not
-saved yet).
+dedup/recent-meals context, model-availability check, and
+meal_plan/suggestion persistence (results are returned as-is, not saved
+yet).
 """
 
 from dataclasses import dataclass
@@ -14,9 +15,9 @@ from dataclasses import dataclass
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.agent import loop, prompts
-from app.agent.output_schema import ProposerPlatsArgs
 from app.domain.agent_run import AgentRun, AgentRunStatus
 from app.domain.fridge_input import FridgeInput
+from app.domain.suggestion import Suggestion
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
@@ -35,7 +36,8 @@ class ClarificationOutcome:
 
 @dataclass
 class CompletedOutcome:
-    plats: ProposerPlatsArgs
+    suggestions: list[Suggestion]
+    notes_generales: str | None
 
 
 SuggestionOutcome = ClarificationOutcome | CompletedOutcome
@@ -104,7 +106,12 @@ class SuggestionService:
         if settings.openrouter_model_id is None:
             raise ModelNotConfiguredError("No OpenRouter model has been selected yet.")
 
-        result = loop.run(token=token, model=settings.openrouter_model_id, messages=messages)
+        result = loop.run(
+            token=token,
+            model=settings.openrouter_model_id,
+            messages=messages,
+            allergies=self._allergy_repository.list_all(),
+        )
 
         if isinstance(result, loop.ClarificationNeeded):
             saved_run = self._agent_run_repository.save(
@@ -134,4 +141,6 @@ class SuggestionService:
                 )
             )
 
-        return CompletedOutcome(plats=result.args)
+        return CompletedOutcome(
+            suggestions=result.suggestions, notes_generales=result.notes_generales
+        )

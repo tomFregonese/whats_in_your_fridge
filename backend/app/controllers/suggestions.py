@@ -21,12 +21,11 @@ def _to_dto(fridge_input_id: int, outcome: SuggestionOutcome) -> SuggestionsResu
             question=outcome.question,
             options=outcome.options,
         )
-    suggestions = [SuggestionDtoOut.from_domain(plat.to_domain()) for plat in outcome.plats.plats]
     return SuggestionsResultDtoOut(
         status="completed",
         fridge_input_id=fridge_input_id,
-        suggestions=suggestions,
-        notes_generales=outcome.plats.notes_generales,
+        suggestions=[SuggestionDtoOut.from_domain(s) for s in outcome.suggestions],
+        notes_generales=outcome.notes_generales,
     )
 
 

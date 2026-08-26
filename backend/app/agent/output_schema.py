@@ -35,12 +35,15 @@ class PlatArgs(BaseModel):
     ingredients: list[PlatIngredient] = Field(min_length=1)
     etapes: list[str] = Field(min_length=1)
 
-    def to_domain(self) -> Suggestion:
+    def to_domain(
+        self, *, allergy_check_status: AllergyCheckStatus = AllergyCheckStatus.OK
+    ) -> Suggestion:
         """Maps to the same `Suggestion` BO the rest of the app already
-        uses (Jalon 5's mock, and later milestones' allergy check /
-        persistence) — the agent doesn't invent its own shape for this.
-        `allergy_check_status` starts at `OK`; the deterministic check that
-        can change it is wired in by a later milestone, not here.
+        uses (Jalon 5's mock, and later milestones' persistence) — the
+        agent doesn't invent its own shape for this. `allergy_check_status`
+        defaults to `OK`; `agent/loop.py` passes the real, deterministically
+        checked status (see `agent/allergy_check.py`) once a dish survives
+        (or is corrected past) that check.
         """
         ingredient_strings = [
             f"{i.nom} ({i.quantite})" if i.quantite else i.nom for i in self.ingredients
@@ -53,7 +56,7 @@ class PlatArgs(BaseModel):
             ingredients_json=json.dumps(ingredient_strings),
             steps_json=json.dumps(self.etapes),
             servings=self.portions,
-            allergy_check_status=AllergyCheckStatus.OK,
+            allergy_check_status=allergy_check_status,
         )
 
 
