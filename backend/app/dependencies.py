@@ -19,6 +19,7 @@ from app.persistence.repositories.settings_repository import SettingsRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
 from app.services.allergy_service import AllergyService
+from app.services.meal_plan_service import MealPlanService
 from app.services.onboarding_service import OnboardingService
 from app.services.preference_service import PreferenceService
 from app.services.settings_service import SettingsService
@@ -92,6 +93,7 @@ def get_dedup_provider(
 def get_suggestion_service(
     fridge_input_repository: FridgeInputRepository = Depends(get_fridge_input_repository),
     agent_run_repository: AgentRunRepository = Depends(get_agent_run_repository),
+    suggestion_repository: SuggestionRepository = Depends(get_suggestion_repository),
     allergy_repository: AllergyRepository = Depends(get_allergy_repository),
     preference_repository: PreferenceNoteRepository = Depends(get_preference_repository),
     settings_service: SettingsService = Depends(get_settings_service),
@@ -101,9 +103,16 @@ def get_suggestion_service(
     return SuggestionService(
         fridge_input_repository,
         agent_run_repository,
+        suggestion_repository,
         allergy_repository,
         preference_repository,
         settings_service,
         security_service,
         dedup_provider,
     )
+
+
+def get_meal_plan_service(
+    repository: SuggestionRepository = Depends(get_suggestion_repository),
+) -> MealPlanService:
+    return MealPlanService(repository)

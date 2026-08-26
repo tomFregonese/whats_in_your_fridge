@@ -2,17 +2,21 @@
 input, builds the agent's conversation (allergies, preferences, and a
 recent-meals dedup context — see `agent/dedup.py`), defensively checks the
 configured model is still live before spending a request on it, runs the
-tool-calling loop (allergy-checked — see `agent/allergy_check.py`), and
-persists `agent_run` state across clarification round-trips.
+tool-calling loop (allergy-checked — see `agent/allergy_check.py`),
+persists `agent_run` state across clarification round-trips, and — once a
+generation completes — persists the result as a `meal_plan`/`suggestion`
+aggregate (see `SuggestionRepository`), which is also what makes
+`dedup_provider` see real history from the next generation onward.
 
-Not part of this milestone (see the project plan — a later milestone adds
-this without changing this service's shape): meal_plan/suggestion
-persistence (results are returned as-is, not saved yet — which also means
-`dedup_provider` currently always sees empty history; see
-`SuggestionRepository`'s docstring).
+`notes_generales` (the LLM's free-text remarks, e.g. noting a dropped
+allergenic dish) is deliberately *not* persisted — there's no column for
+it on `meal_plan` (see the project plan's schema) — so it's only present
+on the response of the call that produced it, not on later reads of the
+same plan via `GET /api/meal-plans/{id}`.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from openai.types.chat import ChatCompletionMessageParam
 
@@ -20,12 +24,13 @@ from app.agent import loop, prompts
 from app.agent.catalog import is_model_available
 from app.agent.dedup import DedupProvider
 from app.domain.agent_run import AgentRun, AgentRunStatus
-from app.domain.fridge_input import FridgeInput
-from app.domain.suggestion import Suggestion
+from app.domain.fridge_input import FridgeInput, FridgeInputMode
+from app.domain.suggestion import MealPlan, Suggestion
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.preference_note_repository import PreferenceNoteRepository
+from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
 from app.services.exceptions import (
     ModelNotConfiguredError,
@@ -44,6 +49,7 @@ class ClarificationOutcome:
 
 @dataclass
 class CompletedOutcome:
+    meal_plan_id: int
     suggestions: list[Suggestion]
     notes_generales: str | None
 
@@ -56,6 +62,7 @@ class SuggestionService:
         self,
         fridge_input_repository: FridgeInputRepository,
         agent_run_repository: AgentRunRepository,
+        suggestion_repository: SuggestionRepository,
         allergy_repository: AllergyRepository,
         preference_repository: PreferenceNoteRepository,
         settings_service: SettingsService,
@@ -64,6 +71,7 @@ class SuggestionService:
     ) -> None:
         self._fridge_input_repository = fridge_input_repository
         self._agent_run_repository = agent_run_repository
+        self._suggestion_repository = suggestion_repository
         self._allergy_repository = allergy_repository
         self._preference_repository = preference_repository
         self._settings_service = settings_service
@@ -86,7 +94,9 @@ class SuggestionService:
             {"role": "user", "content": prompts.build_user_message(saved_input)},
         ]
 
-        outcome = self._run_loop(fridge_input_id=saved_input.id, messages=messages)
+        outcome = self._run_loop(
+            fridge_input_id=saved_input.id, mode=saved_input.mode, messages=messages
+        )
         return saved_input.id, outcome
 
     def respond(self, run_id: int, answer: str) -> tuple[int, SuggestionOutcome]:
@@ -94,12 +104,17 @@ class SuggestionService:
         if agent_run is None:
             raise NotFoundError(f"Agent run {run_id} does not exist.")
 
+        fridge_input = self._fridge_input_repository.get(agent_run.fridge_input_id)
+        if fridge_input is None:
+            raise NotFoundError(f"Fridge input {agent_run.fridge_input_id} does not exist.")
+
         messages = loop.deserialize_messages(agent_run.messages_json)
         tool_call_id = loop.pending_tool_call_id(messages)
         messages.append(loop.build_tool_result_message(tool_call_id, answer))
 
         outcome = self._run_loop(
             fridge_input_id=agent_run.fridge_input_id,
+            mode=fridge_input.mode,
             messages=messages,
             existing_run_id=run_id,
         )
@@ -109,6 +124,7 @@ class SuggestionService:
         self,
         *,
         fridge_input_id: int,
+        mode: FridgeInputMode,
         messages: list[ChatCompletionMessageParam],
         existing_run_id: int | None = None,
     ) -> SuggestionOutcome:
@@ -157,6 +173,19 @@ class SuggestionService:
                 )
             )
 
+        saved_meal_plan = self._suggestion_repository.add(
+            MealPlan(
+                id=None,
+                fridge_input_id=fridge_input_id,
+                mode=mode,
+                created_at=datetime.now(UTC),
+                suggestions=result.suggestions,
+            )
+        )
+        assert saved_meal_plan.id is not None
+
         return CompletedOutcome(
-            suggestions=result.suggestions, notes_generales=result.notes_generales
+            meal_plan_id=saved_meal_plan.id,
+            suggestions=saved_meal_plan.suggestions,
+            notes_generales=result.notes_generales,
         )

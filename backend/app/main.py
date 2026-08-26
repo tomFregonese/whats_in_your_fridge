@@ -2,7 +2,16 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.controllers import allergies, auth, health, onboarding, preferences, settings, suggestions
+from app.controllers import (
+    allergies,
+    auth,
+    health,
+    meal_plans,
+    onboarding,
+    preferences,
+    settings,
+    suggestions,
+)
 from app.services.exceptions import (
     AgentResponseInvalidError,
     AlreadyOnboardedError,
@@ -140,3 +149,4 @@ app.include_router(settings.router, prefix="/api")
 app.include_router(allergies.router, prefix="/api")
 app.include_router(preferences.router, prefix="/api")
 app.include_router(suggestions.router, prefix="/api")
+app.include_router(meal_plans.router, prefix="/api")

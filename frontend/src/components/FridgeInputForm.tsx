@@ -30,7 +30,10 @@ export function FridgeInputForm() {
       return;
     }
     setClarification(null);
-    navigate("/results", { state: { result } });
+    if (result.meal_plan_id === null) return; // never happens for "completed" in practice
+    navigate(`/plan/${String(result.meal_plan_id)}`, {
+      state: { notesGenerales: result.notes_generales },
+    });
   }
 
   async function handleSubmit(event: FormEvent): Promise<void> {

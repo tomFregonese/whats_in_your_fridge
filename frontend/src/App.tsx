@@ -1,9 +1,10 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppGate } from "./components/AppGate";
 import { Home } from "./pages/Home";
+import { MealPlanHistory } from "./pages/MealPlanHistory";
+import { MealPlanPage } from "./pages/MealPlanPage";
 import { Onboarding } from "./pages/Onboarding";
 import { Settings } from "./pages/Settings";
-import { SuggestionsResult } from "./pages/SuggestionsResult";
 import { Unlock } from "./pages/Unlock";
 import "./App.css";
 
@@ -22,10 +23,18 @@ function App() {
           }
         />
         <Route
-          path="/results"
+          path="/plan/:id"
           element={
             <AppGate>
-              <SuggestionsResult />
+              <MealPlanPage />
+            </AppGate>
+          }
+        />
+        <Route
+          path="/history"
+          element={
+            <AppGate>
+              <MealPlanHistory />
             </AppGate>
           }
         />

@@ -24,6 +24,7 @@ def _to_dto(fridge_input_id: int, outcome: SuggestionOutcome) -> SuggestionsResu
     return SuggestionsResultDtoOut(
         status="completed",
         fridge_input_id=fridge_input_id,
+        meal_plan_id=outcome.meal_plan_id,
         suggestions=[SuggestionDtoOut.from_domain(s) for s in outcome.suggestions],
         notes_generales=outcome.notes_generales,
     )

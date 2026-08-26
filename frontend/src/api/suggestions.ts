@@ -22,6 +22,7 @@ export interface Suggestion {
 export interface SuggestionsResult {
   status: "completed" | "clarification_needed";
   fridge_input_id: number;
+  meal_plan_id: number | null;
   suggestions: Suggestion[];
   notes_generales: string | null;
   run_id: number | null;

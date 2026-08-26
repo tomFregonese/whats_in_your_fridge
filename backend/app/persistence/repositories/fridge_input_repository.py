@@ -1,6 +1,7 @@
 from dataclasses import replace
 
-from sqlmodel import Session
+from sqlalchemy import ColumnElement
+from sqlmodel import Session, select
 
 from app.domain.fridge_input import FridgeInput
 from app.persistence.entities.fridge_input_entity import (
@@ -12,6 +13,21 @@ from app.persistence.entities.fridge_input_entity import (
 class FridgeInputRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def get(self, fridge_input_id: int) -> FridgeInput | None:
+        entity = self._session.get(FridgeInputEntity, fridge_input_id)
+        if entity is None:
+            return None
+
+        # Same class-level field access typing gap noted elsewhere.
+        condition: ColumnElement[bool] = (
+            FridgeInputItemEntity.fridge_input_id == fridge_input_id  # type: ignore[assignment]
+        )
+        item_entities = self._session.exec(select(FridgeInputItemEntity).where(condition)).all()
+
+        result = entity.to_domain()
+        result.items = [item_entity.to_domain() for item_entity in item_entities]
+        return result
 
     def add(self, fridge_input: FridgeInput) -> FridgeInput:
         """Persists the parent row, then each item against its real id —

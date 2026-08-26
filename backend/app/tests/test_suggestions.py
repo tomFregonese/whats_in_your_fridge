@@ -105,8 +105,34 @@ def test_create_suggestions_returns_completed_result(client: TestClient) -> None
     body = response.json()
     assert body["status"] == "completed"
     assert isinstance(body["fridge_input_id"], int)
+    assert isinstance(body["meal_plan_id"], int)
     assert body["suggestions"][0]["dish_name"] == "Carrot soup"
     assert body["notes_generales"] == "Enjoy!"
+
+
+def test_create_suggestions_persists_the_meal_plan(client: TestClient) -> None:
+    _setup(client)
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run", return_value=_plats_proposed()),
+    ):
+        response = client.post(
+            "/api/suggestions",
+            json={"mode": "batch", "items": [{"ingredient_name": "carrot", "quantity_raw": "3"}]},
+        )
+    meal_plan_id = response.json()["meal_plan_id"]
+
+    detail = client.get(f"/api/meal-plans/{meal_plan_id}")
+    assert detail.status_code == 200
+    assert detail.json()["mode"] == "batch"
+    assert detail.json()["suggestions"][0]["dish_name"] == "Carrot soup"
+    # Not persisted (no column for it) — see SuggestionService's docstring.
+    assert "notes_generales" not in detail.json()
+
+    listing = client.get("/api/meal-plans")
+    assert listing.status_code == 200
+    assert [p["id"] for p in listing.json()] == [meal_plan_id]
 
 
 def test_create_suggestions_defaults_to_batch_mode(client: TestClient) -> None:
