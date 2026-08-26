@@ -8,13 +8,40 @@ remembers past suggestions to keep things varied, and collects feedback after ea
 
 ## Running the app
 
-Requirement: [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+Requirement: [Docker Desktop](https://www.docker.com/products/docker-desktop/), running.
 
 - **Mac/Linux**: double-click `start.sh` (or `./start.sh` in a terminal)
 - **Windows**: double-click `start.bat`
 
-Then open http://127.0.0.1:8080 in a browser. On first launch, the UI walks you through setup
-(app password, OpenRouter token, model choice, allergies, portions) — nothing to edit by hand.
+The script builds the images, starts both containers, and waits until they report healthy before
+printing the URL to open — usually a few seconds, longer the very first time while images build.
+
+On first launch, the UI walks you through setup (app password, OpenRouter token, model choice,
+allergies, portions) — nothing to edit by hand.
+
+### Changing the port
+
+The app listens on `127.0.0.1:8080` by default. If that port is already taken, edit `APP_PORT` in
+`.env` (created from `.env.example` on first run) and restart with the same script.
+
+### Stopping / restarting
+
+```
+docker compose down     # stop
+docker compose up -d    # restart (no rebuild)
+```
+
+Your data isn't affected either way — it lives outside the containers (see below).
+
+### Updating
+
+Pull the latest code, then run `start.sh` / `start.bat` again — it rebuilds the images and applies
+any database schema changes automatically before starting. Your `data/fridge.db` is untouched.
+
+### Troubleshooting
+
+`docker compose ps` shows both containers' health status. If one is stuck `unhealthy` or keeps
+restarting, `docker compose logs api` or `docker compose logs frontend` has the detail.
 
 ## Data and backups
 
@@ -29,7 +56,3 @@ stored on disk. A copy of `fridge.db` alone therefore stays readable for the res
 but the OpenRouter token can only be decrypted by re-entering that same password in the app. If
 the password is lost, there is no recovery path in V1 — the only option is to clear the stored
 token and re-enter it.
-
-## Project status
-
-Work in progress — see the V1 plan for the full architecture and build milestones.
