@@ -37,3 +37,28 @@ class TokenNotConfiguredError(Exception):
 
 class CatalogUnavailableError(Exception):
     """OpenRouter's model catalog couldn't be fetched."""
+
+
+class OpenRouterError(Exception):
+    """Base class for `agent.client` failures — callers that don't need to
+    distinguish the specific cause can catch just this."""
+
+
+class OpenRouterAuthError(OpenRouterError):
+    """OpenRouter rejected the configured API token."""
+
+
+class OpenRouterRateLimitError(OpenRouterError):
+    """OpenRouter's rate limit was hit."""
+
+
+class OpenRouterTimeoutError(OpenRouterError):
+    """OpenRouter did not respond within the configured timeout."""
+
+
+class OpenRouterConnectionError(OpenRouterError):
+    """OpenRouter could not be reached at all (network/DNS/TLS failure)."""
+
+
+class OpenRouterEmptyResponseError(OpenRouterError):
+    """OpenRouter responded successfully but with no usable content."""

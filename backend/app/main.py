@@ -9,6 +9,11 @@ from app.services.exceptions import (
     InvalidPasswordError,
     NotFoundError,
     NotOnboardedError,
+    OpenRouterAuthError,
+    OpenRouterConnectionError,
+    OpenRouterEmptyResponseError,
+    OpenRouterRateLimitError,
+    OpenRouterTimeoutError,
     PasswordAlreadySetError,
     TokenNotConfiguredError,
     VaultLockedError,
@@ -71,6 +76,40 @@ async def handle_token_not_configured(
 @app.exception_handler(CatalogUnavailableError)
 async def handle_catalog_unavailable(
     request: Request, exc: CatalogUnavailableError
+) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+# `agent/client.py` isn't wired into any endpoint yet (that lands with the
+# full agent loop in a later milestone), but the error → status mapping is
+# part of this milestone's "connectivité, gestion erreurs" scope.
+@app.exception_handler(OpenRouterAuthError)
+async def handle_openrouter_auth_error(request: Request, exc: OpenRouterAuthError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+@app.exception_handler(OpenRouterRateLimitError)
+async def handle_openrouter_rate_limit(
+    request: Request, exc: OpenRouterRateLimitError
+) -> JSONResponse:
+    return JSONResponse(status_code=429, content={"detail": str(exc)})
+
+
+@app.exception_handler(OpenRouterTimeoutError)
+async def handle_openrouter_timeout(request: Request, exc: OpenRouterTimeoutError) -> JSONResponse:
+    return JSONResponse(status_code=504, content={"detail": str(exc)})
+
+
+@app.exception_handler(OpenRouterConnectionError)
+async def handle_openrouter_connection_error(
+    request: Request, exc: OpenRouterConnectionError
+) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+@app.exception_handler(OpenRouterEmptyResponseError)
+async def handle_openrouter_empty_response(
+    request: Request, exc: OpenRouterEmptyResponseError
 ) -> JSONResponse:
     return JSONResponse(status_code=502, content={"detail": str(exc)})
 
