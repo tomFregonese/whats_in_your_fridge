@@ -2,8 +2,15 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.controllers import allergies, health, onboarding, preferences, settings
-from app.services.exceptions import AlreadyOnboardedError, NotFoundError, NotOnboardedError
+from app.controllers import allergies, auth, health, onboarding, preferences, settings
+from app.services.exceptions import (
+    AlreadyOnboardedError,
+    InvalidPasswordError,
+    NotFoundError,
+    NotOnboardedError,
+    PasswordAlreadySetError,
+    VaultLockedError,
+)
 
 app = FastAPI(title="What's in your fridge? API")
 
@@ -35,7 +42,25 @@ async def handle_not_onboarded(request: Request, exc: NotOnboardedError) -> JSON
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
+@app.exception_handler(PasswordAlreadySetError)
+async def handle_password_already_set(
+    request: Request, exc: PasswordAlreadySetError
+) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(InvalidPasswordError)
+async def handle_invalid_password(request: Request, exc: InvalidPasswordError) -> JSONResponse:
+    return JSONResponse(status_code=401, content={"detail": str(exc)})
+
+
+@app.exception_handler(VaultLockedError)
+async def handle_vault_locked(request: Request, exc: VaultLockedError) -> JSONResponse:
+    return JSONResponse(status_code=423, content={"detail": str(exc)})
+
+
 app.include_router(health.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(allergies.router, prefix="/api")

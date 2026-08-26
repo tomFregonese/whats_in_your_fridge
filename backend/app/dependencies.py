@@ -12,6 +12,7 @@ from app.db import get_session
 from app.persistence.repositories.allergy_repository import AllergyRepository
 from app.persistence.repositories.preference_note_repository import PreferenceNoteRepository
 from app.persistence.repositories.settings_repository import SettingsRepository
+from app.security.service import SecurityService
 from app.services.allergy_service import AllergyService
 from app.services.onboarding_service import OnboardingService
 from app.services.preference_service import PreferenceService
@@ -56,3 +57,7 @@ def get_onboarding_service(
     preference_repository: PreferenceNoteRepository = Depends(get_preference_repository),
 ) -> OnboardingService:
     return OnboardingService(settings_repository, allergy_repository, preference_repository)
+
+
+def get_security_service(session: Session = Depends(get_session)) -> SecurityService:
+    return SecurityService(session)

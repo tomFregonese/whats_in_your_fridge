@@ -1,8 +1,9 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { RequireOnboarding } from "./components/RequireOnboarding";
+import { AppGate } from "./components/AppGate";
 import { Home } from "./pages/Home";
 import { Onboarding } from "./pages/Onboarding";
 import { Settings } from "./pages/Settings";
+import { Unlock } from "./pages/Unlock";
 import "./App.css";
 
 function App() {
@@ -10,20 +11,21 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/unlock" element={<Unlock />} />
         <Route
           path="/"
           element={
-            <RequireOnboarding>
+            <AppGate>
               <Home />
-            </RequireOnboarding>
+            </AppGate>
           }
         />
         <Route
           path="/settings"
           element={
-            <RequireOnboarding>
+            <AppGate>
               <Settings />
-            </RequireOnboarding>
+            </AppGate>
           }
         />
       </Routes>

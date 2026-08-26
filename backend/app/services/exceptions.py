@@ -17,3 +17,15 @@ class AlreadyOnboardedError(Exception):
 
 class NotOnboardedError(Exception):
     """A setting was requested before onboarding has completed."""
+
+
+class PasswordAlreadySetError(Exception):
+    """The app password was set up more than once."""
+
+
+class InvalidPasswordError(Exception):
+    """An unlock attempt used the wrong app password (or none was ever set)."""
+
+
+class VaultLockedError(Exception):
+    """Something needed the encryption key before the vault was unlocked."""

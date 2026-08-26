@@ -11,6 +11,17 @@ from app.main import app
 # Importing this registers every entity on `SQLModel.metadata` — without it
 # `SQLModel.metadata.create_all()` below would create zero tables.
 from app.persistence import entities  # noqa: F401
+from app.security import vault
+
+
+@pytest.fixture(autouse=True)
+def reset_vault() -> Generator[None, None, None]:
+    # `security.vault` holds its unlocked key in a module-level variable
+    # (by design — see its docstring), which would otherwise leak the
+    # unlocked state from one test into the next.
+    vault.clear()
+    yield
+    vault.clear()
 
 
 @pytest.fixture(name="session")
