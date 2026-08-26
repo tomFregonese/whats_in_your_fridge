@@ -1,4 +1,5 @@
 import type { Suggestion } from "../api/suggestions";
+import { FeedbackForm } from "./FeedbackForm";
 
 /** One proposed dish — shared by `WeekPlan` (one per dish) and `SingleDish`
  * (usually just one, but stays a list to match the backend's shape). */
@@ -30,6 +31,8 @@ export function DishCard({ dish }: { dish: Suggestion }) {
           ))}
         </ol>
       </div>
+
+      <FeedbackForm suggestionId={dish.id} />
     </div>
   );
 }

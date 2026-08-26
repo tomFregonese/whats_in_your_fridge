@@ -13,12 +13,14 @@ from app.config import settings as app_settings
 from app.db import get_session
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
+from app.persistence.repositories.feedback_repository import FeedbackRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.preference_note_repository import PreferenceNoteRepository
 from app.persistence.repositories.settings_repository import SettingsRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
 from app.services.allergy_service import AllergyService
+from app.services.feedback_service import FeedbackService
 from app.services.meal_plan_service import MealPlanService
 from app.services.onboarding_service import OnboardingService
 from app.services.preference_service import PreferenceService
@@ -116,3 +118,15 @@ def get_meal_plan_service(
     repository: SuggestionRepository = Depends(get_suggestion_repository),
 ) -> MealPlanService:
     return MealPlanService(repository)
+
+
+def get_feedback_repository(session: Session = Depends(get_session)) -> FeedbackRepository:
+    return FeedbackRepository(session)
+
+
+def get_feedback_service(
+    feedback_repository: FeedbackRepository = Depends(get_feedback_repository),
+    suggestion_repository: SuggestionRepository = Depends(get_suggestion_repository),
+    preference_repository: PreferenceNoteRepository = Depends(get_preference_repository),
+) -> FeedbackService:
+    return FeedbackService(feedback_repository, suggestion_repository, preference_repository)

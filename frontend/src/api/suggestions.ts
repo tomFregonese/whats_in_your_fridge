@@ -12,6 +12,7 @@ export interface FridgeInputPayload {
 }
 
 export interface Suggestion {
+  id: number;
   dish_name: string;
   description: string;
   ingredients: string[];

@@ -55,6 +55,14 @@ class SuggestionRepository:
         result.suggestions = self._load_suggestions(meal_plan_id)
         return result
 
+    def get_suggestion(self, suggestion_id: int) -> Suggestion | None:
+        """A single dish, independent of its parent plan — used by
+        `FeedbackService` to validate a `suggestion_id` and to attribute a
+        feedback comment to its dish name.
+        """
+        entity = self._session.get(SuggestionEntity, suggestion_id)
+        return entity.to_domain() if entity is not None else None
+
     def list_all(self) -> list[MealPlan]:
         """Most recent first — the order `MealPlanHistory` renders in."""
         # SQLModel types a class-level field access as its plain Python

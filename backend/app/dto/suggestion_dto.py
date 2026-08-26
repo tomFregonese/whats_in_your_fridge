@@ -10,6 +10,7 @@ from app.domain.suggestion import MealPlan, Suggestion
 
 
 class SuggestionDtoOut(BaseModel):
+    id: int
     dish_name: str
     description: str
     ingredients: list[str]
@@ -18,7 +19,9 @@ class SuggestionDtoOut(BaseModel):
 
     @classmethod
     def from_domain(cls, suggestion: Suggestion) -> SuggestionDtoOut:
+        assert suggestion.id is not None, "SuggestionDtoOut requires a persisted Suggestion"
         return cls(
+            id=suggestion.id,
             dish_name=suggestion.dish_name,
             description=suggestion.description,
             ingredients=json.loads(suggestion.ingredients_json),

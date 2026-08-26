@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends
 
-from app.dependencies import get_suggestion_service
+from app.dependencies import get_feedback_service, get_suggestion_service
+from app.dto.feedback_dto import FeedbackDtoIn, FeedbackDtoOut
 from app.dto.fridge_input_dto import FridgeInputDtoIn
 from app.dto.suggestion_dto import RespondDtoIn, SuggestionDtoOut, SuggestionsResultDtoOut
+from app.services.feedback_service import FeedbackService
 from app.services.suggestion_service import (
     ClarificationOutcome,
     SuggestionOutcome,
@@ -47,3 +49,14 @@ def respond_to_clarification(
 ) -> SuggestionsResultDtoOut:
     fridge_input_id, outcome = service.respond(run_id, dto.answer)
     return _to_dto(fridge_input_id, outcome)
+
+
+@router.post("/{suggestion_id}/feedback", status_code=201)
+def add_feedback(
+    suggestion_id: int,
+    dto: FeedbackDtoIn,
+    service: FeedbackService = Depends(get_feedback_service),
+) -> FeedbackDtoOut:
+    return FeedbackDtoOut.from_domain(
+        service.save(suggestion_id, liked=dto.liked, comment=dto.comment)
+    )
