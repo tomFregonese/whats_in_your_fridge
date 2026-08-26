@@ -8,13 +8,23 @@ remembers past suggestions to keep things varied, and collects feedback after ea
 
 ## Running the app
 
-Requirement: [Docker Desktop](https://www.docker.com/products/docker-desktop/), running.
+Requirement: Docker + Docker Compose, running — [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+is the easiest way to get both (Mac/Windows/Linux); [Colima](https://github.com/abiosoft/colima) +
+Homebrew's `docker-compose` also works on Mac/Linux.
 
-- **Mac/Linux**: double-click `start.sh` (or `./start.sh` in a terminal)
-- **Windows**: double-click `start.bat`
+- **First launch**: run `update.sh` (`update.bat` on Windows) once to build the images, then
+  `start.sh` (`start.bat`) to launch.
+- **Every launch after that**: just `start.sh` / `start.bat`.
 
-The script builds the images, starts both containers, and waits until they report healthy before
-printing the URL to open — usually a few seconds, longer the very first time while images build.
+Both work with either the modern `docker compose` plugin or the standalone `docker-compose`
+binary, whichever they find — the commands below use `docker compose`, swap in `docker-compose`
+if that's what's on your machine.
+
+`start.sh`/`start.bat` only ever *launch* the images already built by `update.sh`/`update.bat` —
+they never build, and fail with a clear message if no image has been built yet, rather than
+silently building one. This keeps what's actually running predictable: it only ever changes when
+you explicitly ask it to, via `update.sh`. Waits until both containers report healthy before
+printing the URL to open.
 
 On first launch, the UI walks you through setup (app password, OpenRouter token, model choice,
 allergies, portions) — nothing to edit by hand.
@@ -35,8 +45,15 @@ Your data isn't affected either way — it lives outside the containers (see bel
 
 ### Updating
 
-Pull the latest code, then run `start.sh` / `start.bat` again — it rebuilds the images and applies
-any database schema changes automatically before starting. Your `data/fridge.db` is untouched.
+Pull the latest code, then:
+
+```
+./update.sh   # rebuilds the images from the new source — safe to run while the app is up,
+              # the running containers keep using the old image until the next step
+./start.sh    # picks up the newly built image and restarts; DB schema changes apply automatically
+```
+
+Your `data/fridge.db` is untouched by either step.
 
 ### Troubleshooting
 
