@@ -8,12 +8,15 @@ construct a repository or service themselves.
 from fastapi import Depends
 from sqlmodel import Session
 
+from app.agent.dedup import DedupProvider, RecentDishNamesDedupProvider
+from app.config import settings as app_settings
 from app.db import get_session
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.preference_note_repository import PreferenceNoteRepository
 from app.persistence.repositories.settings_repository import SettingsRepository
+from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
 from app.services.allergy_service import AllergyService
 from app.services.onboarding_service import OnboardingService
@@ -76,6 +79,16 @@ def get_agent_run_repository(session: Session = Depends(get_session)) -> AgentRu
     return AgentRunRepository(session)
 
 
+def get_suggestion_repository(session: Session = Depends(get_session)) -> SuggestionRepository:
+    return SuggestionRepository(session)
+
+
+def get_dedup_provider(
+    repository: SuggestionRepository = Depends(get_suggestion_repository),
+) -> DedupProvider:
+    return RecentDishNamesDedupProvider(repository, app_settings.history_window_n)
+
+
 def get_suggestion_service(
     fridge_input_repository: FridgeInputRepository = Depends(get_fridge_input_repository),
     agent_run_repository: AgentRunRepository = Depends(get_agent_run_repository),
@@ -83,6 +96,7 @@ def get_suggestion_service(
     preference_repository: PreferenceNoteRepository = Depends(get_preference_repository),
     settings_service: SettingsService = Depends(get_settings_service),
     security_service: SecurityService = Depends(get_security_service),
+    dedup_provider: DedupProvider = Depends(get_dedup_provider),
 ) -> SuggestionService:
     return SuggestionService(
         fridge_input_repository,
@@ -91,4 +105,5 @@ def get_suggestion_service(
         preference_repository,
         settings_service,
         security_service,
+        dedup_provider,
     )

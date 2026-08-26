@@ -1,13 +1,15 @@
 """Orchestrates one fridge-input submission end to end: persists the
-input, builds the agent's conversation, runs the tool-calling loop
-(allergy-checked — see `agent/allergy_check.py`), and persists `agent_run`
-state across clarification round-trips.
+input, builds the agent's conversation (allergies, preferences, and a
+recent-meals dedup context — see `agent/dedup.py`), runs the tool-calling
+loop (allergy-checked — see `agent/allergy_check.py`), and persists
+`agent_run` state across clarification round-trips.
 
 Not part of this milestone (see the project plan — later milestones add
 each of these around the same loop without changing its shape):
-dedup/recent-meals context, model-availability check, and
-meal_plan/suggestion persistence (results are returned as-is, not saved
-yet).
+model-availability check, and meal_plan/suggestion persistence (results
+are returned as-is, not saved yet — which also means `dedup_provider`
+currently always sees empty history until that persistence lands; see
+`SuggestionRepository`'s docstring).
 """
 
 from dataclasses import dataclass
@@ -15,6 +17,7 @@ from dataclasses import dataclass
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.agent import loop, prompts
+from app.agent.dedup import DedupProvider
 from app.domain.agent_run import AgentRun, AgentRunStatus
 from app.domain.fridge_input import FridgeInput
 from app.domain.suggestion import Suggestion
@@ -52,6 +55,7 @@ class SuggestionService:
         preference_repository: PreferenceNoteRepository,
         settings_service: SettingsService,
         security_service: SecurityService,
+        dedup_provider: DedupProvider,
     ) -> None:
         self._fridge_input_repository = fridge_input_repository
         self._agent_run_repository = agent_run_repository
@@ -59,6 +63,7 @@ class SuggestionService:
         self._preference_repository = preference_repository
         self._settings_service = settings_service
         self._security_service = security_service
+        self._dedup_provider = dedup_provider
 
     def generate(self, fridge_input: FridgeInput) -> tuple[int, SuggestionOutcome]:
         saved_input = self._fridge_input_repository.add(fridge_input)
@@ -69,6 +74,7 @@ class SuggestionService:
             default_servings=settings.default_servings,
             allergies=self._allergy_repository.list_all(),
             preferences=self._preference_repository.list_all(),
+            dedup_context=self._dedup_provider.get_exclusion_context(),
         )
         messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": system_prompt},

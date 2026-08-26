@@ -1,11 +1,10 @@
 """System/user prompt construction for the agent loop.
 
-Milestone 7 scope: household context (portions, allergies, preferences,
-fridge contents). Recent-meal variety context is added by `dedup.py` in a
-later milestone (see the project plan) — not referenced here yet, and the
-allergy list below is informational context for the model only; the
-deterministic code-level check that actually enforces it is wired in by
-another later milestone too.
+Household context: portions, allergies, preferences, fridge contents, and
+(since milestone 9) a recent-meals dedup context — see `agent/dedup.py`.
+The allergy list below is informational context for the model only; the
+deterministic code-level check that actually enforces it lives in
+`agent/allergy_check.py`.
 """
 
 from app.domain.allergy import Allergy
@@ -20,6 +19,7 @@ def build_system_prompt(
     default_servings: int,
     allergies: list[Allergy],
     preferences: list[PreferenceNote],
+    dedup_context: str = "",
 ) -> str:
     lines = [
         "You are a batch-cooking assistant for a self-hosted household app. "
@@ -38,6 +38,9 @@ def build_system_prompt(
     if preferences:
         notes = "; ".join(preference.content for preference in preferences)
         lines.append(f"Known preferences from this household: {notes}.")
+
+    if dedup_context:
+        lines.append(dedup_context)
 
     lines.append(
         "Every final answer must go through the `proposer_plats` tool. If the fridge "

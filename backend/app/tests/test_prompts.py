@@ -30,6 +30,25 @@ def test_system_prompt_omits_allergy_section_when_none() -> None:
     assert "STRICT ALLERGIES" not in prompt
 
 
+def test_system_prompt_includes_dedup_context_when_present() -> None:
+    prompt = prompts.build_system_prompt(
+        default_servings=4,
+        allergies=[],
+        preferences=[],
+        dedup_context='Recently suggested dishes to avoid repeating: "Carrot soup".',
+    )
+
+    assert "Carrot soup" in prompt
+
+
+def test_system_prompt_omits_dedup_section_when_empty() -> None:
+    prompt = prompts.build_system_prompt(
+        default_servings=4, allergies=[], preferences=[], dedup_context=""
+    )
+
+    assert "Recently suggested" not in prompt
+
+
 def test_system_prompt_includes_preferences_when_present() -> None:
     preferences = [
         PreferenceNote(
