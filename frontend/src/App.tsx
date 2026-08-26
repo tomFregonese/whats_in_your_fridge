@@ -3,6 +3,7 @@ import { AppGate } from "./components/AppGate";
 import { Home } from "./pages/Home";
 import { Onboarding } from "./pages/Onboarding";
 import { Settings } from "./pages/Settings";
+import { SuggestionsResult } from "./pages/SuggestionsResult";
 import { Unlock } from "./pages/Unlock";
 import "./App.css";
 
@@ -17,6 +18,14 @@ function App() {
           element={
             <AppGate>
               <Home />
+            </AppGate>
+          }
+        />
+        <Route
+          path="/results"
+          element={
+            <AppGate>
+              <SuggestionsResult />
             </AppGate>
           }
         />

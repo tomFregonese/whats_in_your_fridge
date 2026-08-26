@@ -10,6 +10,7 @@ from sqlmodel import Session
 
 from app.db import get_session
 from app.persistence.repositories.allergy_repository import AllergyRepository
+from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.preference_note_repository import PreferenceNoteRepository
 from app.persistence.repositories.settings_repository import SettingsRepository
 from app.security.service import SecurityService
@@ -17,6 +18,7 @@ from app.services.allergy_service import AllergyService
 from app.services.onboarding_service import OnboardingService
 from app.services.preference_service import PreferenceService
 from app.services.settings_service import SettingsService
+from app.services.suggestion_service import SuggestionService
 
 
 def get_settings_repository(session: Session = Depends(get_session)) -> SettingsRepository:
@@ -61,3 +63,15 @@ def get_onboarding_service(
 
 def get_security_service(session: Session = Depends(get_session)) -> SecurityService:
     return SecurityService(session)
+
+
+def get_fridge_input_repository(
+    session: Session = Depends(get_session),
+) -> FridgeInputRepository:
+    return FridgeInputRepository(session)
+
+
+def get_suggestion_service(
+    repository: FridgeInputRepository = Depends(get_fridge_input_repository),
+) -> SuggestionService:
+    return SuggestionService(repository)

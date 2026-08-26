@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppLayout } from "../components/AppLayout";
+import { FridgeInputForm } from "../components/FridgeInputForm";
 import { ModelField } from "../components/ModelField";
 import { ServingsField } from "../components/ServingsField";
 import type { SettingsOut } from "../api/settings";
@@ -45,15 +46,7 @@ export function Home() {
         )}
       </div>
 
-      <div className="card">
-        <div className="empty-state">
-          <span className="icon">🥕</span>
-          <p>
-            Fridge input and meal suggestions are coming in a later milestone. Your setup above is
-            already saved and ready for when they land.
-          </p>
-        </div>
-      </div>
+      <FridgeInputForm />
     </AppLayout>
   );
 }

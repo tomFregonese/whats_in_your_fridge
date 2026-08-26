@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.controllers import allergies, auth, health, onboarding, preferences, settings
+from app.controllers import allergies, auth, health, onboarding, preferences, settings, suggestions
 from app.services.exceptions import (
     AlreadyOnboardedError,
     CatalogUnavailableError,
@@ -81,3 +81,4 @@ app.include_router(onboarding.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(allergies.router, prefix="/api")
 app.include_router(preferences.router, prefix="/api")
+app.include_router(suggestions.router, prefix="/api")
