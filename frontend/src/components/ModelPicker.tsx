@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FreeModel } from "../api/settings";
 import { listFreeModels } from "../api/settings";
+import { ApiErrorMessage } from "./ApiErrorMessage";
 
 interface ModelPickerProps {
   selectedId: string | null;
@@ -12,13 +13,15 @@ type State = "loading" | "ready" | "error";
 export function ModelPicker({ selectedId, onSelect }: ModelPickerProps) {
   const [models, setModels] = useState<FreeModel[]>([]);
   const [state, setState] = useState<State>("loading");
+  const [error, setError] = useState<unknown>(null);
 
   async function load(): Promise<void> {
     setState("loading");
     try {
       setModels(await listFreeModels());
       setState("ready");
-    } catch {
+    } catch (err) {
+      setError(err);
       setState("error");
     }
   }
@@ -34,7 +37,7 @@ export function ModelPicker({ selectedId, onSelect }: ModelPickerProps) {
   if (state === "error") {
     return (
       <div className="model-picker-error">
-        <p className="error">Couldn't reach OpenRouter's model catalog.</p>
+        <ApiErrorMessage error={error} />
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => void load()}>
           Retry
         </button>

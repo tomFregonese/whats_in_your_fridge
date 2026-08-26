@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import type { SuggestionsResult } from "../api/suggestions";
 import { createSuggestions, respondToClarification } from "../api/suggestions";
+import { ApiErrorMessage } from "./ApiErrorMessage";
 import { ClarificationModal } from "./ClarificationModal";
 import type { IngredientEntry } from "./IngredientListInput";
 import { IngredientListInput } from "./IngredientListInput";
@@ -19,7 +20,7 @@ export function FridgeInputForm() {
   const [ingredients, setIngredients] = useState<IngredientEntry[]>([]);
   const [freeText, setFreeText] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [clarification, setClarification] = useState<PendingClarification | null>(null);
 
   function handleResult(result: SuggestionsResult): void {
@@ -54,8 +55,8 @@ export function FridgeInputForm() {
         })),
       });
       handleResult(result);
-    } catch {
-      setError("Something went wrong — please try again.");
+    } catch (err) {
+      setError(err);
     } finally {
       setSubmitting(false);
     }
@@ -68,9 +69,9 @@ export function FridgeInputForm() {
     try {
       const result = await respondToClarification(clarification.runId, answer);
       handleResult(result);
-    } catch {
+    } catch (err) {
       setClarification(null);
-      setError("Something went wrong — please try again.");
+      setError(err);
     } finally {
       setSubmitting(false);
     }
@@ -118,7 +119,7 @@ export function FridgeInputForm() {
             />
           </div>
 
-          {error && <p className="error">{error}</p>}
+          <ApiErrorMessage error={error} />
 
           <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
             {submitting ? "Thinking…" : "Get suggestions"}

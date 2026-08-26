@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { submitFeedback } from "../api/feedback";
+import { ApiErrorMessage } from "./ApiErrorMessage";
 
 interface FeedbackFormProps {
   suggestionId: number;
@@ -19,22 +20,22 @@ export function FeedbackForm({ suggestionId }: FeedbackFormProps) {
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
   const canSubmit = liked !== null || comment.trim().length > 0;
 
   async function handleSubmit(): Promise<void> {
     if (!canSubmit) return;
     setSubmitting(true);
-    setError(false);
+    setError(null);
     try {
       await submitFeedback(suggestionId, {
         ...(liked !== null ? { liked } : {}),
         ...(comment.trim() ? { comment: comment.trim() } : {}),
       });
       setSubmitted(true);
-    } catch {
-      setError(true);
+    } catch (err) {
+      setError(err);
     } finally {
       setSubmitting(false);
     }
@@ -81,7 +82,7 @@ export function FeedbackForm({ suggestionId }: FeedbackFormProps) {
       >
         {submitting ? "Sending…" : "Send feedback"}
       </button>
-      {error && <p className="error">Something went wrong — please try again.</p>}
+      <ApiErrorMessage error={error} />
     </div>
   );
 }

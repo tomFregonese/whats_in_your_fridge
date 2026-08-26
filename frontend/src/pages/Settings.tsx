@@ -7,6 +7,7 @@ import type { PreferenceNote } from "../api/preferences";
 import { addPreference, deletePreference, listPreferences } from "../api/preferences";
 import type { SettingsOut } from "../api/settings";
 import { getSettings, updateSettings } from "../api/settings";
+import { ApiErrorMessage } from "../components/ApiErrorMessage";
 import { AppLayout } from "../components/AppLayout";
 import { ModelField } from "../components/ModelField";
 import { ServingsField } from "../components/ServingsField";
@@ -18,6 +19,7 @@ export function Settings() {
   const [newAllergyName, setNewAllergyName] = useState("");
   const [newPreference, setNewPreference] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
 
   async function loadAll(): Promise<void> {
     // `loading` already starts `true` (see useState above) — this only
@@ -38,42 +40,72 @@ export function Settings() {
   }, []);
 
   async function handleSaveServings(value: number): Promise<void> {
-    setSettings(await updateSettings(value, settings?.openrouter_model_id ?? undefined));
+    setError(null);
+    try {
+      setSettings(await updateSettings(value, settings?.openrouter_model_id ?? undefined));
+    } catch (err) {
+      setError(err);
+    }
   }
 
   async function handleSelectModel(modelId: string): Promise<void> {
     if (!settings) return;
-    setSettings(await updateSettings(settings.default_servings, modelId));
+    setError(null);
+    try {
+      setSettings(await updateSettings(settings.default_servings, modelId));
+    } catch (err) {
+      setError(err);
+    }
   }
 
   async function handleAddAllergy(event: FormEvent): Promise<void> {
     event.preventDefault();
     const name = newAllergyName.trim();
     if (!name) return;
-    const created = await addAllergy(name);
-    setAllergies((prev) =>
-      [...prev, created].sort((a, b) => a.ingredient_name.localeCompare(b.ingredient_name)),
-    );
-    setNewAllergyName("");
+    setError(null);
+    try {
+      const created = await addAllergy(name);
+      setAllergies((prev) =>
+        [...prev, created].sort((a, b) => a.ingredient_name.localeCompare(b.ingredient_name)),
+      );
+      setNewAllergyName("");
+    } catch (err) {
+      setError(err);
+    }
   }
 
   async function handleDeleteAllergy(id: number): Promise<void> {
-    await deleteAllergy(id);
-    setAllergies((prev) => prev.filter((allergy) => allergy.id !== id));
+    setError(null);
+    try {
+      await deleteAllergy(id);
+      setAllergies((prev) => prev.filter((allergy) => allergy.id !== id));
+    } catch (err) {
+      setError(err);
+    }
   }
 
   async function handleAddPreference(event: FormEvent): Promise<void> {
     event.preventDefault();
     const content = newPreference.trim();
     if (!content) return;
-    const created = await addPreference(content);
-    setPreferences((prev) => [created, ...prev]);
-    setNewPreference("");
+    setError(null);
+    try {
+      const created = await addPreference(content);
+      setPreferences((prev) => [created, ...prev]);
+      setNewPreference("");
+    } catch (err) {
+      setError(err);
+    }
   }
 
   async function handleDeletePreference(id: number): Promise<void> {
-    await deletePreference(id);
-    setPreferences((prev) => prev.filter((note) => note.id !== id));
+    setError(null);
+    try {
+      await deletePreference(id);
+      setPreferences((prev) => prev.filter((note) => note.id !== id));
+    } catch (err) {
+      setError(err);
+    }
   }
 
   if (loading || !settings) {
@@ -90,6 +122,8 @@ export function Settings() {
         <h1>Settings</h1>
         <p>Everything you can configure lives here.</p>
       </div>
+
+      <ApiErrorMessage error={error} />
 
       <div className="card">
         <div className="card-header">
@@ -210,17 +244,21 @@ function TokenField({ configured, onSaved }: { configured: boolean; onSaved: () 
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
   async function handleSubmit(event: FormEvent): Promise<void> {
     event.preventDefault();
     const trimmed = value.trim();
     if (!trimmed) return;
     setSubmitting(true);
+    setError(null);
     try {
       await saveToken(trimmed);
       setValue("");
       setEditing(false);
       onSaved();
+    } catch (err) {
+      setError(err);
     } finally {
       setSubmitting(false);
     }
@@ -241,21 +279,24 @@ function TokenField({ configured, onSaved }: { configured: boolean; onSaved: () 
   }
 
   return (
-    <form onSubmit={(event) => void handleSubmit(event)} className="inline-form">
-      <input
-        type="password"
-        placeholder="OpenRouter API key"
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        aria-label="OpenRouter API key"
-        autoFocus
-      />
-      <button type="submit" className="btn btn-primary" disabled={submitting}>
-        {submitting ? "Saving…" : "Save"}
-      </button>
-      <button type="button" className="btn btn-ghost" onClick={() => setEditing(false)}>
-        Cancel
-      </button>
-    </form>
+    <>
+      <form onSubmit={(event) => void handleSubmit(event)} className="inline-form">
+        <input
+          type="password"
+          placeholder="OpenRouter API key"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          aria-label="OpenRouter API key"
+          autoFocus
+        />
+        <button type="submit" className="btn btn-primary" disabled={submitting}>
+          {submitting ? "Saving…" : "Save"}
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={() => setEditing(false)}>
+          Cancel
+        </button>
+      </form>
+      <ApiErrorMessage error={error} />
+    </>
   );
 }
