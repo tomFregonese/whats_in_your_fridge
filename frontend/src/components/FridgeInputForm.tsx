@@ -1,9 +1,17 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { createSuggestions } from "../api/suggestions";
+import type { SuggestionsResult } from "../api/suggestions";
+import { createSuggestions, respondToClarification } from "../api/suggestions";
+import { ClarificationModal } from "./ClarificationModal";
 import type { IngredientEntry } from "./IngredientListInput";
 import { IngredientListInput } from "./IngredientListInput";
+
+interface PendingClarification {
+  runId: number;
+  question: string;
+  options: string[] | null;
+}
 
 export function FridgeInputForm() {
   const navigate = useNavigate();
@@ -12,6 +20,18 @@ export function FridgeInputForm() {
   const [freeText, setFreeText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [clarification, setClarification] = useState<PendingClarification | null>(null);
+
+  function handleResult(result: SuggestionsResult): void {
+    if (result.status === "clarification_needed" && result.run_id !== null && result.question) {
+      // Could itself be answered with *another* clarification — this just
+      // re-renders the modal with the new question in that case.
+      setClarification({ runId: result.run_id, question: result.question, options: result.options });
+      return;
+    }
+    setClarification(null);
+    navigate("/results", { state: { result } });
+  }
 
   async function handleSubmit(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -30,7 +50,7 @@ export function FridgeInputForm() {
           quantity_raw: item.quantity || undefined,
         })),
       });
-      navigate("/results", { state: { result } });
+      handleResult(result);
     } catch {
       setError("Something went wrong — please try again.");
     } finally {
@@ -38,53 +58,79 @@ export function FridgeInputForm() {
     }
   }
 
+  async function handleClarificationAnswer(answer: string): Promise<void> {
+    if (!clarification) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await respondToClarification(clarification.runId, answer);
+      handleResult(result);
+    } catch {
+      setClarification(null);
+      setError("Something went wrong — please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
-    <div className="card">
-      <div className="card-header">
-        <h2>🥕 What's in your fridge?</h2>
-      </div>
-      <p className="card-description">Tell us what you've got, and we'll suggest what to cook.</p>
+    <>
+      <div className="card">
+        <div className="card-header">
+          <h2>🥕 What's in your fridge?</h2>
+        </div>
+        <p className="card-description">Tell us what you've got, and we'll suggest what to cook.</p>
 
-      <form onSubmit={(event) => void handleSubmit(event)}>
-        <div className="field">
-          <span className="field-label">Mode</span>
-          <div className="segmented">
-            <button
-              type="button"
-              className={mode === "batch" ? "active" : ""}
-              onClick={() => setMode("batch")}
-            >
-              Batch cooking
-            </button>
-            <button
-              type="button"
-              className={mode === "single" ? "active" : ""}
-              onClick={() => setMode("single")}
-            >
-              Single dish
-            </button>
+        <form onSubmit={(event) => void handleSubmit(event)}>
+          <div className="field">
+            <span className="field-label">Mode</span>
+            <div className="segmented">
+              <button
+                type="button"
+                className={mode === "batch" ? "active" : ""}
+                onClick={() => setMode("batch")}
+              >
+                Batch cooking
+              </button>
+              <button
+                type="button"
+                className={mode === "single" ? "active" : ""}
+                onClick={() => setMode("single")}
+              >
+                Single dish
+              </button>
+            </div>
           </div>
-        </div>
 
-        <IngredientListInput items={ingredients} onChange={setIngredients} />
+          <IngredientListInput items={ingredients} onChange={setIngredients} />
 
-        <div className="field">
-          <label htmlFor="free-text">Anything else? (optional)</label>
-          <textarea
-            id="free-text"
-            rows={3}
-            value={freeText}
-            onChange={(event) => setFreeText(event.target.value)}
-            placeholder="e.g. also have half a lemon and some leftover rice"
-          />
-        </div>
+          <div className="field">
+            <label htmlFor="free-text">Anything else? (optional)</label>
+            <textarea
+              id="free-text"
+              rows={3}
+              value={freeText}
+              onChange={(event) => setFreeText(event.target.value)}
+              placeholder="e.g. also have half a lemon and some leftover rice"
+            />
+          </div>
 
-        {error && <p className="error">{error}</p>}
+          {error && <p className="error">{error}</p>}
 
-        <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
-          {submitting ? "Thinking…" : "Get suggestions"}
-        </button>
-      </form>
-    </div>
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
+            {submitting ? "Thinking…" : "Get suggestions"}
+          </button>
+        </form>
+      </div>
+
+      {clarification && (
+        <ClarificationModal
+          question={clarification.question}
+          options={clarification.options}
+          submitting={submitting}
+          onAnswer={(answer) => void handleClarificationAnswer(answer)}
+        />
+      )}
+    </>
   );
 }

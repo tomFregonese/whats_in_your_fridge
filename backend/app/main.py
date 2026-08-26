@@ -4,9 +4,11 @@ from fastapi.responses import JSONResponse
 
 from app.controllers import allergies, auth, health, onboarding, preferences, settings, suggestions
 from app.services.exceptions import (
+    AgentResponseInvalidError,
     AlreadyOnboardedError,
     CatalogUnavailableError,
     InvalidPasswordError,
+    ModelNotConfiguredError,
     NotFoundError,
     NotOnboardedError,
     OpenRouterAuthError,
@@ -80,9 +82,6 @@ async def handle_catalog_unavailable(
     return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
-# `agent/client.py` isn't wired into any endpoint yet (that lands with the
-# full agent loop in a later milestone), but the error → status mapping is
-# part of this milestone's "connectivité, gestion erreurs" scope.
 @app.exception_handler(OpenRouterAuthError)
 async def handle_openrouter_auth_error(request: Request, exc: OpenRouterAuthError) -> JSONResponse:
     return JSONResponse(status_code=502, content={"detail": str(exc)})
@@ -112,6 +111,20 @@ async def handle_openrouter_empty_response(
     request: Request, exc: OpenRouterEmptyResponseError
 ) -> JSONResponse:
     return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+@app.exception_handler(AgentResponseInvalidError)
+async def handle_agent_response_invalid(
+    request: Request, exc: AgentResponseInvalidError
+) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+@app.exception_handler(ModelNotConfiguredError)
+async def handle_model_not_configured(
+    request: Request, exc: ModelNotConfiguredError
+) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 app.include_router(health.router, prefix="/api")

@@ -9,6 +9,7 @@ from fastapi import Depends
 from sqlmodel import Session
 
 from app.db import get_session
+from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.preference_note_repository import PreferenceNoteRepository
@@ -71,7 +72,23 @@ def get_fridge_input_repository(
     return FridgeInputRepository(session)
 
 
+def get_agent_run_repository(session: Session = Depends(get_session)) -> AgentRunRepository:
+    return AgentRunRepository(session)
+
+
 def get_suggestion_service(
-    repository: FridgeInputRepository = Depends(get_fridge_input_repository),
+    fridge_input_repository: FridgeInputRepository = Depends(get_fridge_input_repository),
+    agent_run_repository: AgentRunRepository = Depends(get_agent_run_repository),
+    allergy_repository: AllergyRepository = Depends(get_allergy_repository),
+    preference_repository: PreferenceNoteRepository = Depends(get_preference_repository),
+    settings_service: SettingsService = Depends(get_settings_service),
+    security_service: SecurityService = Depends(get_security_service),
 ) -> SuggestionService:
-    return SuggestionService(repository)
+    return SuggestionService(
+        fridge_input_repository,
+        agent_run_repository,
+        allergy_repository,
+        preference_repository,
+        settings_service,
+        security_service,
+    )

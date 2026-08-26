@@ -62,3 +62,11 @@ class OpenRouterConnectionError(OpenRouterError):
 
 class OpenRouterEmptyResponseError(OpenRouterError):
     """OpenRouter responded successfully but with no usable content."""
+
+
+class AgentResponseInvalidError(Exception):
+    """The model failed to produce a valid tool call after all retries."""
+
+
+class ModelNotConfiguredError(Exception):
+    """A suggestion was requested before an OpenRouter model was chosen."""

@@ -26,7 +26,7 @@ export function SuggestionsResult() {
     <AppLayout>
       <div className="page-header">
         <h1>Here's what we suggest</h1>
-        <p>Mocked for now — real suggestions land once the OpenRouter agent is wired in.</p>
+        {result.notes_generales && <p>{result.notes_generales}</p>}
       </div>
 
       {result.suggestions.map((dish) => (

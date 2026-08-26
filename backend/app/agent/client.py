@@ -1,10 +1,8 @@
 """Minimal OpenRouter chat-completions client.
 
 Wraps the OpenAI SDK pointed at OpenRouter's endpoint (they're API
-compatible). No tool-calling here yet — that's the agent loop, built in a
-later milestone (`agent/loop.py`, `agent/tools.py`). This module only
-proves the connection works and turns SDK failures into this app's own
-typed exceptions, so callers never need to know about the `openai` package.
+compatible). Turns SDK failures into this app's own typed exceptions, so
+callers never need to know about the `openai` package.
 
 The token and model are passed in by the caller (sourced from
 `security.service.SecurityService.get_token()` and
@@ -21,7 +19,11 @@ from openai import (
     OpenAI,
     RateLimitError,
 )
-from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat import (
+    ChatCompletionMessage,
+    ChatCompletionMessageParam,
+    ChatCompletionToolParam,
+)
 
 from app.services.exceptions import (
     OpenRouterAuthError,
@@ -43,15 +45,48 @@ def complete(
     model: str,
     messages: Iterable[ChatCompletionMessageParam],
 ) -> str:
-    """Sends one chat-completion request and returns the assistant's text.
+    """Sends one chat-completion request (no tools) and returns the
+    assistant's text. Used for simple, non-agentic calls — the tool-calling
+    loop uses `complete_with_tools` instead.
+    """
+    message = _request(token=token, model=model, messages=messages, tools=None)
+    if not message.content:
+        raise OpenRouterEmptyResponseError("OpenRouter returned an empty message.")
+    return message.content
 
-    Raises an `OpenRouterError` subclass on any failure — the raw `openai`
-    SDK exceptions never escape this function.
+
+def complete_with_tools(
+    *,
+    token: str,
+    model: str,
+    messages: Iterable[ChatCompletionMessageParam],
+    tools: Iterable[ChatCompletionToolParam],
+) -> ChatCompletionMessage:
+    """Sends one chat-completion request with tools available and returns
+    the raw assistant message — the caller (`agent/loop.py`) inspects
+    `.tool_calls`, since interpreting them is the loop's job, not this
+    module's.
+    """
+    return _request(token=token, model=model, messages=messages, tools=tools)
+
+
+def _request(
+    *,
+    token: str,
+    model: str,
+    messages: Iterable[ChatCompletionMessageParam],
+    tools: Iterable[ChatCompletionToolParam] | None,
+) -> ChatCompletionMessage:
+    """Raises an `OpenRouterError` subclass on any failure — the raw
+    `openai` SDK exceptions never escape this module.
     """
     client = OpenAI(api_key=token, base_url=OPENROUTER_BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS)
 
     try:
-        response = client.chat.completions.create(model=model, messages=messages)
+        if tools is None:
+            response = client.chat.completions.create(model=model, messages=messages)
+        else:
+            response = client.chat.completions.create(model=model, messages=messages, tools=tools)
     except AuthenticationError as exc:
         raise OpenRouterAuthError("OpenRouter rejected the configured API token.") from exc
     except RateLimitError as exc:
@@ -69,8 +104,4 @@ def complete(
     if not response.choices:
         raise OpenRouterEmptyResponseError("OpenRouter returned no choices.")
 
-    content = response.choices[0].message.content
-    if not content:
-        raise OpenRouterEmptyResponseError("OpenRouter returned an empty message.")
-
-    return content
+    return response.choices[0].message
