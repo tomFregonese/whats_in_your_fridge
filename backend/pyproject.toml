@@ -33,6 +33,9 @@ testpaths = ["app/tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Alembic-generated revision scripts follow Alembic's own template/style,
+# not ours, and are never hand-edited — excluded rather than fought.
+extend-exclude = ["migrations/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -40,3 +43,4 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+exclude = ["migrations/versions"]
