@@ -274,10 +274,6 @@ function ConnectionTestIndicator({
     }
   }
 
-  const label = status === "idle" ? "Test connection" : "";
-  const dotClass =
-    status === "ok" ? "ok" : status === "fail" ? "fail" : status === "testing" ? "pending" : "";
-
   return (
     <div className="field-row">
       <div className="field">

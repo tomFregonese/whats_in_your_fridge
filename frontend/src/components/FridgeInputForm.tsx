@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { createSuggestionsStream, respondToClarificationStream } from "../api/suggestions";
+import type { DishIdea } from "../api/suggestions";
+import {
+  createSuggestionsStream,
+  respondToClarificationStream,
+  selectIdeasStream,
+} from "../api/suggestions";
 import { ApiErrorMessage } from "./ApiErrorMessage";
 import { ClarificationModal } from "./ClarificationModal";
+import { DishIdeaSelector } from "./DishIdeaSelector";
 import { ReasoningBlock } from "./ReasoningBlock";
 import type { IngredientEntry } from "./IngredientListInput";
 import { IngredientListInput } from "./IngredientListInput";
@@ -16,11 +22,12 @@ interface PendingClarification {
 
 /** SSE event shape from the streaming endpoint */
 interface SseEvent {
-  type: "reasoning" | "clarification" | "completed" | "error" | "done";
+  type: "reasoning" | "clarification" | "ideas" | "completed" | "error" | "done";
   content?: string;
   run_id?: number;
   question?: string;
   options?: string[] | null;
+  ideas?: DishIdea[];
   meal_plan_id?: number;
   notes_generales?: string | null;
   detail?: string;
@@ -34,6 +41,7 @@ export function FridgeInputForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [clarification, setClarification] = useState<PendingClarification | null>(null);
+  const [ideas, setIdeas] = useState<DishIdea[] | null>(null);
   const [reasoning, setReasoning] = useState("");
   const [streamingActive, setStreamingActive] = useState(false);
   const runIdRef = useRef<number | null>(null);
@@ -66,13 +74,20 @@ export function FridgeInputForm() {
           const opts = event.options ?? null;
           const rid = event.run_id ?? 0;
           clarifyingRef.current = true;
+          setIdeas(null);
           setClarification({ runId: rid, question: q, options: opts });
           break;
         }
 
+        case "ideas":
+          setClarification(null);
+          setIdeas(event.ideas ?? []);
+          break;
+
         case "completed":
           clarifyingRef.current = false;
           setClarification(null);
+          setIdeas(null);
           setStreamingActive(false);
           if (event.meal_plan_id) {
             navigate(`/plan/${String(event.meal_plan_id)}`, {
@@ -82,6 +97,7 @@ export function FridgeInputForm() {
           break;
 
         case "error":
+          setIdeas(null);
           setError(new Error(event.detail ?? "An unknown error occurred."));
           setStreamingActive(false);
           break;
@@ -111,6 +127,18 @@ export function FridgeInputForm() {
     [],
   );
 
+  /** Called when the user confirms which dish idea(s) they want cooked */
+  const handleIdeaSelectionConfirm = useCallback(async (selectedIndexes: number[]) => {
+    const runId = runIdRef.current;
+    if (!runId) return;
+    setIdeas(null);
+    try {
+      await selectIdeasStream(runId, selectedIndexes);
+    } catch (err) {
+      setError(err);
+    }
+  }, []);
+
   /** Start streaming: POST to create the stream, then open SSE */
   const handleSubmit = useCallback(
     async (event: FormEvent): Promise<void> => {
@@ -124,6 +152,7 @@ export function FridgeInputForm() {
       setError(null);
       setReasoning("");
       setClarification(null);
+      setIdeas(null);
       cleanup();
 
       try {
@@ -225,6 +254,15 @@ export function FridgeInputForm() {
       {streamingActive && <ReasoningBlock reasoning={reasoning} active={true} />}
       {reasoning && !streamingActive && !error && (
         <ReasoningBlock reasoning={reasoning} active={false} />
+      )}
+
+      {ideas && ideas.length > 0 && (
+        <DishIdeaSelector
+          ideas={ideas}
+          mode={mode}
+          submitting={false}
+          onConfirm={(selectedIndexes) => void handleIdeaSelectionConfirm(selectedIndexes)}
+        />
       )}
 
       {clarification && (

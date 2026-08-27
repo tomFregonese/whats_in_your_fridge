@@ -3,6 +3,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.agent import loop
+from app.domain.dish_idea import DishIdea
 from app.domain.suggestion import AllergyCheckStatus, Suggestion
 
 PASSWORD = "correct horse battery staple"
@@ -37,6 +38,31 @@ def _plats_proposed() -> loop.PlatsProposed:
             )
         ],
         notes_generales="Enjoy!",
+    )
+
+
+def _ideas_proposed() -> loop.IdeasProposed:
+    return loop.IdeasProposed(
+        ideas=[
+            DishIdea(dish_name="Carrot soup", description="Simple soup"),
+            DishIdea(dish_name="Tomato soup", description="Another soup"),
+        ],
+        notes_generales="Pick one!",
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "proposer_idees", "arguments": "{}"},
+                    }
+                ],
+            },
+        ],
     )
 
 
@@ -86,15 +112,15 @@ def test_create_suggestions_rejects_unknown_mode(client: TestClient) -> None:
     assert response.status_code == 422
 
 
-# --- Real flow (setup + mocked loop — no live LLM call in tests) ---
+# --- IDEAS phase (setup + mocked loop — no live LLM call in tests) ---
 
 
-def test_create_suggestions_returns_completed_result(client: TestClient) -> None:
+def test_create_suggestions_returns_ideas_proposed_result(client: TestClient) -> None:
     _setup(client)
 
     with (
         patch("app.services.suggestion_service.is_model_available", return_value=True),
-        patch("app.services.suggestion_service.loop.run", return_value=_plats_proposed()),
+        patch("app.services.suggestion_service.loop.run_ideas", return_value=_ideas_proposed()),
     ):
         response = client.post(
             "/api/suggestions",
@@ -103,36 +129,15 @@ def test_create_suggestions_returns_completed_result(client: TestClient) -> None
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "completed"
+    assert body["status"] == "ideas_proposed"
     assert isinstance(body["fridge_input_id"], int)
-    assert isinstance(body["meal_plan_id"], int)
-    assert body["suggestions"][0]["dish_name"] == "Carrot soup"
-    assert body["notes_generales"] == "Enjoy!"
-
-
-def test_create_suggestions_persists_the_meal_plan(client: TestClient) -> None:
-    _setup(client)
-
-    with (
-        patch("app.services.suggestion_service.is_model_available", return_value=True),
-        patch("app.services.suggestion_service.loop.run", return_value=_plats_proposed()),
-    ):
-        response = client.post(
-            "/api/suggestions",
-            json={"mode": "batch", "items": [{"ingredient_name": "carrot", "quantity_raw": "3"}]},
-        )
-    meal_plan_id = response.json()["meal_plan_id"]
-
-    detail = client.get(f"/api/meal-plans/{meal_plan_id}")
-    assert detail.status_code == 200
-    assert detail.json()["mode"] == "batch"
-    assert detail.json()["suggestions"][0]["dish_name"] == "Carrot soup"
-    # Not persisted (no column for it) — see SuggestionService's docstring.
-    assert "notes_generales" not in detail.json()
-
-    listing = client.get("/api/meal-plans")
-    assert listing.status_code == 200
-    assert [p["id"] for p in listing.json()] == [meal_plan_id]
+    assert isinstance(body["run_id"], int)
+    assert body["ideas"] == [
+        {"index": 0, "dish_name": "Carrot soup", "description": "Simple soup"},
+        {"index": 1, "dish_name": "Tomato soup", "description": "Another soup"},
+    ]
+    assert body["notes_generales"] == "Pick one!"
+    assert body["suggestions"] == []
 
 
 def test_create_suggestions_defaults_to_batch_mode(client: TestClient) -> None:
@@ -140,7 +145,7 @@ def test_create_suggestions_defaults_to_batch_mode(client: TestClient) -> None:
 
     with (
         patch("app.services.suggestion_service.is_model_available", return_value=True),
-        patch("app.services.suggestion_service.loop.run", return_value=_plats_proposed()),
+        patch("app.services.suggestion_service.loop.run_ideas", return_value=_ideas_proposed()),
     ):
         response = client.post("/api/suggestions", json={"items": [{"ingredient_name": "egg"}]})
 
@@ -152,7 +157,7 @@ def test_create_suggestions_returns_clarification_needed(client: TestClient) -> 
 
     with (
         patch("app.services.suggestion_service.is_model_available", return_value=True),
-        patch("app.services.suggestion_service.loop.run", return_value=_clarification()),
+        patch("app.services.suggestion_service.loop.run_ideas", return_value=_clarification()),
     ):
         response = client.post(
             "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
@@ -165,13 +170,14 @@ def test_create_suggestions_returns_clarification_needed(client: TestClient) -> 
     assert body["options"] == ["2", "4"]
     assert isinstance(body["run_id"], int)
     assert body["suggestions"] == []
+    assert body["ideas"] == []
 
 
-def test_respond_continues_the_conversation_and_appends_the_answer(client: TestClient) -> None:
+def test_respond_resumes_ideas_phase_clarification(client: TestClient) -> None:
     _setup(client)
     with (
         patch("app.services.suggestion_service.is_model_available", return_value=True),
-        patch("app.services.suggestion_service.loop.run", return_value=_clarification()),
+        patch("app.services.suggestion_service.loop.run_ideas", return_value=_clarification()),
     ):
         first = client.post(
             "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
@@ -181,16 +187,16 @@ def test_respond_continues_the_conversation_and_appends_the_answer(client: TestC
     with (
         patch("app.services.suggestion_service.is_model_available", return_value=True),
         patch(
-            "app.services.suggestion_service.loop.run", return_value=_plats_proposed()
-        ) as mock_run,
+            "app.services.suggestion_service.loop.run_ideas", return_value=_ideas_proposed()
+        ) as mock_run_ideas,
     ):
         response = client.post(
             f"/api/suggestions/runs/{run_id}/respond", json={"answer": "4 people"}
         )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "completed"
-    sent_messages = mock_run.call_args.kwargs["messages"]
+    assert response.json()["status"] == "ideas_proposed"
+    sent_messages = mock_run_ideas.call_args.kwargs["messages"]
     assert sent_messages[-1] == {"role": "tool", "tool_call_id": "call_1", "content": "4 people"}
 
 
@@ -230,11 +236,109 @@ def test_create_suggestions_returns_409_when_model_no_longer_available(
 
     with (
         patch("app.services.suggestion_service.is_model_available", return_value=False),
-        patch("app.services.suggestion_service.loop.run") as mock_run,
+        patch("app.services.suggestion_service.loop.run_ideas") as mock_run_ideas,
     ):
         response = client.post(
             "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
         )
 
     assert response.status_code == 409
-    mock_run.assert_not_called()
+    mock_run_ideas.assert_not_called()
+
+
+# --- Selection -> RECIPES phase ---
+
+
+def _propose_ideas(client: TestClient) -> str:
+    _setup(client)
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run_ideas", return_value=_ideas_proposed()),
+    ):
+        response = client.post(
+            "/api/suggestions",
+            json={"mode": "batch", "items": [{"ingredient_name": "carrot", "quantity_raw": "3"}]},
+        )
+    return str(response.json()["run_id"])
+
+
+def test_select_returns_completed_result_and_persists_the_meal_plan(client: TestClient) -> None:
+    run_id = _propose_ideas(client)
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch(
+            "app.services.suggestion_service.loop.run", return_value=_plats_proposed()
+        ) as mock_run,
+    ):
+        response = client.post(
+            f"/api/suggestions/runs/{run_id}/select", json={"selected_indexes": [0]}
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["suggestions"][0]["dish_name"] == "Carrot soup"
+    assert mock_run.call_args.kwargs["selected_dish_names"] == ["Carrot soup"]
+    sent_messages = mock_run.call_args.kwargs["messages"]
+    tool_feedback = [m["content"] for m in sent_messages if m.get("role") == "tool"]
+    assert any(fb and "Carrot soup" in fb for fb in tool_feedback)
+
+    meal_plan_id = body["meal_plan_id"]
+    detail = client.get(f"/api/meal-plans/{meal_plan_id}")
+    assert detail.status_code == 200
+    assert detail.json()["mode"] == "batch"
+    assert detail.json()["suggestions"][0]["dish_name"] == "Carrot soup"
+
+    listing = client.get("/api/meal-plans")
+    assert listing.status_code == 200
+    assert [p["id"] for p in listing.json()] == [meal_plan_id]
+
+
+def test_select_with_unknown_run_id_returns_404(client: TestClient) -> None:
+    _setup(client)
+
+    response = client.post("/api/suggestions/runs/999/select", json={"selected_indexes": [0]})
+
+    assert response.status_code == 404
+
+
+def test_select_with_out_of_range_index_returns_404(client: TestClient) -> None:
+    run_id = _propose_ideas(client)
+
+    response = client.post(
+        f"/api/suggestions/runs/{run_id}/select", json={"selected_indexes": [5]}
+    )
+
+    assert response.status_code == 404
+
+
+def test_respond_resumes_recipes_phase_clarification(client: TestClient) -> None:
+    run_id = _propose_ideas(client)
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run", return_value=_clarification()),
+    ):
+        selected = client.post(
+            f"/api/suggestions/runs/{run_id}/select", json={"selected_indexes": [0]}
+        )
+    assert selected.status_code == 200
+    assert selected.json()["status"] == "clarification_needed"
+    recipe_run_id = selected.json()["run_id"]
+    # `select()` resumes the same AgentRun row rather than creating a new one.
+    assert str(recipe_run_id) == run_id
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch(
+            "app.services.suggestion_service.loop.run", return_value=_plats_proposed()
+        ) as mock_run,
+    ):
+        response = client.post(
+            f"/api/suggestions/runs/{recipe_run_id}/respond", json={"answer": "yes, that's fine"}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert mock_run.call_args.kwargs["selected_dish_names"] == ["Carrot soup"]

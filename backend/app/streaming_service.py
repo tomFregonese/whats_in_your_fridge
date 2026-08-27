@@ -2,9 +2,22 @@
 with async SSE delivery.
 
 Designed for exactly-once, per-run use: create a run via
-`StreamingOrchestrator.start_stream()`, subscribe via
-`StreamingOrchestrator.sse_generator()`, then clean up automatically when
-the stream or the background thread finishes.
+``start_background()``, subscribe via ``sse_generator()``, then clean up
+automatically when the stream or the background thread finishes.
+
+The background thread walks both agent phases (`AgentRunPhase`) in one
+loop — `IDEAS` then `RECIPES` — pausing for either a clarification answer
+or (once, between phases) a dish selection, each delivered from the
+``respond-stream``/``select-stream`` controller endpoints via
+``deliver_answer()``/``deliver_selection()``. Either phase may pause for
+0 or more clarification rounds before producing its "final answer", same
+as the non-streaming loop in `agent/loop.py`.
+
+Every per-run dict below is keyed by the *streaming* run id (the
+`fridge_input.id` passed into ``start_background()``), not the DB
+`agent_run.id` — the frontend only ever addresses a stream by the former
+(see `FridgeInputForm.tsx`); the latter travels in SSE event payloads only
+for parity with the non-streaming Dto shape.
 """
 
 from __future__ import annotations
@@ -16,72 +29,95 @@ import threading
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
+from openai.types.chat import ChatCompletionMessageParam
+
 from app.agent import loop
 from app.agent.dedup import DedupProvider
-from app.agent.loop import LoopResult
-from app.domain.agent_run import AgentRun, AgentRunStatus
+from app.agent.loop import IdeasLoopResult, LoopResult
+from app.domain.agent_run import AgentRun, AgentRunPhase, AgentRunStatus
+from app.domain.allergy import Allergy
+from app.domain.dish_idea import DishIdea
 from app.domain.fridge_input import FridgeInput
 from app.domain.suggestion import MealPlan
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
-from app.persistence.repositories.allergy_repository import AllergyRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
 from app.services.exceptions import NotFoundError
 from app.services.settings_service import SettingsService
 
-# Per-run in-memory state — keyed by agent_run DB id.
-_buffers: dict[int, queue.Queue] = {}
+# Per-run in-memory state — keyed by the streaming run id.
+_buffers: dict[int, queue.Queue[dict[str, object]]] = {}
 _done_events: dict[int, threading.Event] = {}
-_answer_ready: dict[int, threading.Event] = {}
+_input_ready: dict[int, threading.Event] = {}
 _answers: dict[int, str] = {}
-_locks: dict[int, threading.Lock] = {}
+_selections: dict[int, list[int]] = {}
 _background_threads: dict[int, threading.Thread] = {}
 
 
-def _event(run_id: int, **kwargs: object) -> None:
-    """Push a JSON-serialisable event into the run's buffer."""
+def _event(run_id: int, payload: dict[str, object]) -> None:
+    """Push a JSON-serialisable event into the run's buffer. `payload` is a
+    plain dict (rather than `**kwargs`) so it can freely carry its own
+    `run_id` key (the DB `agent_run.id`, for parity with the non-streaming
+    Dto shape) without colliding with this function's own `run_id`
+    parameter (the streaming run id used to look up the buffer).
+    """
     buf = _buffers.get(run_id)
     if buf is not None:
-        buf.put_nowait(kwargs)
+        buf.put_nowait(payload)
 
 
 def _cleanup(run_id: int) -> None:
     _buffers.pop(run_id, None)
     _done_events.pop(run_id, None)
-    _answer_ready.pop(run_id, None)
+    _input_ready.pop(run_id, None)
     _answers.pop(run_id, None)
-    _locks.pop(run_id, None)
+    _selections.pop(run_id, None)
     _background_threads.pop(run_id, None)
 
 
-def _run_loop(
+def _encode_ideas_json(ideas: list[DishIdea]) -> str:
+    return json.dumps([{"dish_name": i.dish_name, "description": i.description} for i in ideas])
+
+
+def _stream_run_ideas(
+    *, run_id: int, token: str, model: str, messages: list[ChatCompletionMessageParam]
+) -> IdeasLoopResult:
+    return loop.stream_run_ideas(
+        token=token,
+        model=model,
+        messages=messages,
+        reasoning_callback=lambda text: _event(run_id, {"type": "reasoning", "content": text}),
+    )
+
+
+def _stream_run_recipes(
+    *,
     run_id: int,
     token: str,
-    messages: list[dict],
     model: str,
-    allergies: list,
+    messages: list[ChatCompletionMessageParam],
+    allergies: list[Allergy],
+    selected_dish_names: list[str],
 ) -> LoopResult:
-    """Same logic as `SuggestionService._run_loop` but with streaming."""
-    result = loop.stream_run(
+    return loop.stream_run(
         token=token,
         model=model,
         messages=messages,
         allergies=allergies,
-        reasoning_callback=lambda text: _event(run_id, type="reasoning", content=text),
+        selected_dish_names=selected_dish_names,
+        reasoning_callback=lambda text: _event(run_id, {"type": "reasoning", "content": text}),
     )
-    return result
 
 
 def start_background(
     *,
     run_id: int,
     fridge_input: FridgeInput,
-    messages: list[dict],
-    existing_run_id: int | None,
+    messages: list[ChatCompletionMessageParam],
     token: str,
     model: str,
-    allergies: list,
+    allergies: list[Allergy],
     fridge_input_repository: FridgeInputRepository,
     agent_run_repository: AgentRunRepository,
     suggestion_repository: SuggestionRepository,
@@ -89,90 +125,173 @@ def start_background(
     security_service: SecurityService,
     dedup_provider: DedupProvider,
 ) -> None:
-    """Start a background thread that runs the agent loop with streaming.
+    """Start a background thread running the two-phase agent loop with
+    streaming. `messages` is the `IDEAS`-phase system+user prompt.
 
-    Must be called AFTER ``_init(run_id)`` so the buffer exists.
-    The thread writes ``reasoning``, ``completed``, ``clarification``,
+    Must be called AFTER the buffer exists (it creates it). The thread
+    writes ``reasoning``, ``ideas``, ``clarification``, ``completed``,
     ``error``, and ``done`` events into the per-run buffer.
     """
-    buf = queue.Queue()
+    buf: queue.Queue[dict[str, object]] = queue.Queue()
     done = threading.Event()
-    answer_ready = threading.Event()
+    input_ready = threading.Event()
 
     _buffers[run_id] = buf
     _done_events[run_id] = done
-    _answer_ready[run_id] = answer_ready
-    _answers[run_id] = ""
-    _locks[run_id] = threading.Lock()
+    _input_ready[run_id] = input_ready
 
     def _background() -> None:
-        try:
-            loop_result = _run_loop(
-                run_id=run_id,
-                token=token,
-                messages=messages,
-                model=model,
-                allergies=allergies,
-            )
+        assert fridge_input.id is not None
+        phase = AgentRunPhase.IDEAS
+        current_messages = messages
+        run_db_id: int | None = None
+        selected_dish_names: list[str] = []
+        ideas_so_far: list[DishIdea] = []
 
-            if isinstance(loop_result, loop.ClarificationNeeded):
-                # Persist the agent run and send clarification event
-                saved_run = agent_run_repository.save(
+        try:
+            while True:
+                if phase == AgentRunPhase.IDEAS:
+                    ideas_result = _stream_run_ideas(
+                        run_id=run_id, token=token, model=model, messages=current_messages
+                    )
+                    phase_result: IdeasLoopResult | LoopResult = ideas_result
+                else:
+                    phase_result = _stream_run_recipes(
+                        run_id=run_id,
+                        token=token,
+                        model=model,
+                        messages=current_messages,
+                        allergies=allergies,
+                        selected_dish_names=selected_dish_names,
+                    )
+
+                if isinstance(phase_result, loop.ClarificationNeeded):
+                    saved_run = agent_run_repository.save(
+                        AgentRun(
+                            id=run_db_id,
+                            fridge_input_id=fridge_input.id,
+                            status=AgentRunStatus.AWAITING_CLARIFICATION,
+                            phase=phase,
+                            messages_json=loop.serialize_messages(phase_result.messages),
+                            pending_question=phase_result.question,
+                            proposed_ideas_json=(
+                                _encode_ideas_json(
+                                    [
+                                        DishIdea(dish_name=n, description="")
+                                        for n in selected_dish_names
+                                    ]
+                                )
+                                if phase == AgentRunPhase.RECIPES
+                                else None
+                            ),
+                        )
+                    )
+                    run_db_id = saved_run.id
+                    _event(
+                        run_id,
+                        {
+                            "type": "clarification",
+                            "run_id": saved_run.id,
+                            "question": phase_result.question,
+                            "options": phase_result.options,
+                        },
+                    )
+
+                    input_ready.wait()
+                    input_ready.clear()
+                    answer = _answers.pop(run_id, "")
+
+                    tool_call_id = loop.pending_tool_call_id(phase_result.messages)
+                    current_messages = list(phase_result.messages)
+                    current_messages.append(loop.build_tool_result_message(tool_call_id, answer))
+                    continue  # same phase, one more round
+
+                if isinstance(phase_result, loop.IdeasProposed):
+                    ideas_so_far = phase_result.ideas
+                    saved_run = agent_run_repository.save(
+                        AgentRun(
+                            id=run_db_id,
+                            fridge_input_id=fridge_input.id,
+                            status=AgentRunStatus.AWAITING_SELECTION,
+                            phase=AgentRunPhase.IDEAS,
+                            messages_json=loop.serialize_messages(phase_result.messages),
+                            pending_question=None,
+                            proposed_ideas_json=_encode_ideas_json(ideas_so_far),
+                        )
+                    )
+                    run_db_id = saved_run.id
+                    _event(
+                        run_id,
+                        {
+                            "type": "ideas",
+                            "run_id": saved_run.id,
+                            "ideas": [
+                                {
+                                    "index": i,
+                                    "dish_name": idea.dish_name,
+                                    "description": idea.description,
+                                }
+                                for i, idea in enumerate(ideas_so_far)
+                            ],
+                            "notes_generales": phase_result.notes_generales,
+                        },
+                    )
+
+                    input_ready.wait()
+                    input_ready.clear()
+                    selected_indexes = _selections.pop(run_id, [])
+                    selected = [ideas_so_far[i] for i in selected_indexes]
+                    selected_dish_names = [idea.dish_name for idea in selected]
+
+                    tool_call_id = loop.pending_tool_call_id(phase_result.messages)
+                    names = ", ".join(f'"{n}"' for n in selected_dish_names)
+                    content = (
+                        f"The user selected: {names}. Call `proposer_plats` now with the "
+                        "full recipe for exactly these dishes, in this order, and no others."
+                    )
+                    current_messages = list(phase_result.messages)
+                    current_messages.append(loop.build_tool_result_message(tool_call_id, content))
+                    phase = AgentRunPhase.RECIPES
+                    continue
+
+                # Only PlatsProposed remains — the RECIPES phase's final answer.
+                assert run_db_id is not None
+                existing = agent_run_repository.get(run_db_id)
+                assert existing is not None
+                agent_run_repository.save(
                     AgentRun(
-                        id=existing_run_id,
+                        id=run_db_id,
                         fridge_input_id=fridge_input.id,
-                        status=AgentRunStatus.AWAITING_CLARIFICATION,
-                        messages_json=loop.serialize_messages(loop_result.messages),
-                        pending_question=loop_result.question,
+                        status=AgentRunStatus.COMPLETED,
+                        phase=AgentRunPhase.RECIPES,
+                        messages_json=existing.messages_json,
+                        pending_question=None,
+                        proposed_ideas_json=None,
                     )
                 )
-                _event(
-                    run_id,
-                    type="clarification",
-                    run_id=saved_run.id,
-                    question=loop_result.question,
-                    options=loop_result.options,
-                )
-
-                # Wait for the user to respond
-                answer_ready.wait()
-                user_answer = _answers[run_id]
-
-                # Resume loop with the user's answer
-                tool_call_id = loop.pending_tool_call_id(loop_result.messages)
-                loop_result.messages.append(loop.build_tool_result_message(tool_call_id, user_answer))
-
-                # Re-run the loop with the clarification answer (one more call)
-                loop_result = _run_loop(
-                    run_id=run_id,
-                    token=token,
-                    messages=loop_result.messages,
-                    model=model,
-                    allergies=allergies,
-                )
-
-            # Now handle the final result
-            if isinstance(loop_result, loop.PlatsProposed):
                 saved_meal_plan = suggestion_repository.add(
                     MealPlan(
                         id=None,
                         fridge_input_id=fridge_input.id,
                         mode=fridge_input.mode,
                         created_at=datetime.now(UTC),
-                        suggestions=loop_result.suggestions,
+                        suggestions=phase_result.suggestions,
                     )
                 )
                 _event(
                     run_id,
-                    type="completed",
-                    meal_plan_id=saved_meal_plan.id,
-                    notes_generales=loop_result.notes_generales,
+                    {
+                        "type": "completed",
+                        "meal_plan_id": saved_meal_plan.id,
+                        "notes_generales": phase_result.notes_generales,
+                    },
                 )
+                break
 
         except Exception as exc:
-            _event(run_id, type="error", detail=str(exc))
+            _event(run_id, {"type": "error", "detail": str(exc)})
         finally:
-            _event(run_id, type="done")
+            _event(run_id, {"type": "done"})
             done.set()
             _buffers.pop(run_id, None)
 
@@ -183,15 +302,25 @@ def start_background(
 
 def deliver_answer(run_id: int, answer: str) -> None:
     """Called from the ``respond-stream`` controller endpoint to unblock
-    the background thread waiting on a clarification answer.
+    the background thread waiting on a clarification answer, in either
+    phase.
     """
-    ready = _answer_ready.get(run_id)
+    ready = _input_ready.get(run_id)
     if ready is None:
         raise NotFoundError(f"No active streaming session for run {run_id}.")
     _answers[run_id] = answer
     ready.set()
-    # Cleanup per-run answer controls so they don't leak
-    _answer_ready.pop(run_id, None)
+
+
+def deliver_selection(run_id: int, selected_indexes: list[int]) -> None:
+    """Called from the ``select-stream`` controller endpoint to unblock the
+    background thread waiting on a dish selection after the `IDEAS` phase.
+    """
+    ready = _input_ready.get(run_id)
+    if ready is None:
+        raise NotFoundError(f"No active streaming session for run {run_id}.")
+    _selections[run_id] = selected_indexes
+    ready.set()
 
 
 async def sse_generator(run_id: int) -> AsyncGenerator[str, None]:

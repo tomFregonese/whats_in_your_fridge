@@ -26,8 +26,10 @@ class AgentRunRepository:
             if existing is None:
                 raise ValueError(f"AgentRun {agent_run.id} does not exist.")
             existing.status = agent_run.status.value
+            existing.phase = agent_run.phase.value
             existing.messages_json = agent_run.messages_json
             existing.pending_question = agent_run.pending_question
+            existing.proposed_ideas_json = agent_run.proposed_ideas_json
             entity = existing
 
         self._session.commit()

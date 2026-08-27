@@ -1,16 +1,25 @@
 """The agent tool-calling loop.
 
-Two entry points:
-- `run()` — synchronous, non-streaming (existing callers).
-- `stream_run()` — same logic but streams reasoning tokens via callback.
+Two phases (see `AgentRunPhase`), each with sync + streaming entry points:
+- `run_ideas()` / `stream_run_ideas()` — `IDEAS` phase: a shortlist of dish
+  ideas (name + description, no ingredients/steps).
+- `run()` / `stream_run()` — `RECIPES` phase: the full recipe for exactly
+  the idea(s) the user picked (see `selected_dish_names`).
 
-Calls the model with both tools and interprets the result: either a
-clarifying question (stop and wait for the user — see `ClarificationNeeded`)
-or a validated, allergy-checked set of proposed dishes (`PlatsProposed`).
-Bounded retries handle the model producing malformed tool-call arguments,
-no tool call at all, or (see `agent/allergy_check.py`) a dish that
-violates a strict household allergy — a real, if uncommon, occurrence
-with `:free` models either way.
+Each entry point calls the model with the phase's two tools and interprets
+the result: either a clarifying question (stop and wait for the user — see
+`ClarificationNeeded`) or the phase's validated "final answer"
+(`IdeasProposed` / `PlatsProposed`). Bounded retries handle the model
+producing malformed tool-call arguments, no tool call at all, (`RECIPES`
+only, see `agent/allergy_check.py`) a dish that violates a strict
+household allergy, or (`RECIPES` only) a recipe that doesn't match what
+the user actually selected — all real, if uncommon, occurrences with
+`:free` models either way.
+
+The four entry points share the module-level helpers below rather than a
+unified abstraction — same sync/streaming duplication already accepted
+between the original `run()`/`stream_run()` pair, now also between the
+`RECIPES` and `IDEAS` phases.
 
 Dedup context is NOT wired in here yet (see the project plan — a later
 milestone adds it as the "recent meals" part of the prompt, without
@@ -20,6 +29,7 @@ changing this loop's shape).
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from openai.types.chat import (
     ChatCompletionMessageFunctionToolCall,
@@ -29,9 +39,16 @@ from openai.types.chat import (
 from pydantic import ValidationError
 
 from app.agent import allergy_check, client
-from app.agent.output_schema import DemanderPrecisionArgs, ProposerPlatsArgs
-from app.agent.tools import DEMANDER_PRECISION, PROPOSER_PLATS, build_tools
+from app.agent.output_schema import (
+    DemanderPrecisionArgs,
+    PlatArgs,
+    ProposerIdeesArgs,
+    ProposerPlatsArgs,
+)
+from app.agent.tools import DEMANDER_PRECISION, PROPOSER_IDEES, PROPOSER_PLATS, build_tools
+from app.domain.agent_run import AgentRunPhase
 from app.domain.allergy import Allergy
+from app.domain.dish_idea import DishIdea
 from app.domain.suggestion import AllergyCheckStatus, Suggestion
 from app.services.exceptions import AgentResponseInvalidError
 
@@ -57,7 +74,18 @@ class PlatsProposed:
     notes_generales: str | None
 
 
+@dataclass
+class IdeasProposed:
+    ideas: list[DishIdea]
+    notes_generales: str | None
+    messages: list[ChatCompletionMessageParam]
+    """Same role as `ClarificationNeeded.messages` — persisted so `select()`
+    (in `services/suggestion_service.py`) can resume the conversation once
+    the user has picked."""
+
+
 LoopResult = ClarificationNeeded | PlatsProposed
+IdeasLoopResult = ClarificationNeeded | IdeasProposed
 
 
 def run(
@@ -66,8 +94,12 @@ def run(
     model: str,
     messages: list[ChatCompletionMessageParam],
     allergies: list[Allergy],
+    selected_dish_names: list[str],
 ) -> LoopResult:
-    tools = build_tools()
+    """`RECIPES` phase: generates the full recipe for exactly
+    `selected_dish_names` (the ideas the user picked out of what
+    `run_ideas()` proposed)."""
+    tools = build_tools(AgentRunPhase.RECIPES)
     working_messages = list(messages)
 
     for attempt in range(MAX_ATTEMPTS):
@@ -114,43 +146,123 @@ def run(
                 continue
 
             working_messages.append(_assistant_message(tool_call_param))
+            last_attempt = attempt == MAX_ATTEMPTS - 1
             # Attempt > 0 here means at least one earlier round (JSON-
-            # invalid or allergy-violating) had to be corrected — everyone
-            # surviving this round is fairly labeled REGENERATED, not OK.
+            # invalid, allergy-violating, or selection-mismatched) had to
+            # be corrected — everyone surviving this round is fairly
+            # labeled REGENERATED, not OK.
             status = AllergyCheckStatus.OK if attempt == 0 else AllergyCheckStatus.REGENERATED
 
             safe_plats, violations = allergy_check.check_all(plats_args.plats, allergies)
 
-            if not violations:
-                return PlatsProposed(
-                    suggestions=[
-                        plat.to_domain(allergy_check_status=status) for plat in safe_plats
-                    ],
-                    notes_generales=plats_args.notes_generales,
+            if violations:
+                if last_attempt:
+                    # Out of attempts — resolve now rather than erroring
+                    # out: keep whatever's safe, drop the rest, and say so.
+                    dropped_names = [violation.plat.nom for violation in violations]
+                    note = _dropped_note(plats_args.notes_generales, dropped_names)
+                    return PlatsProposed(
+                        suggestions=[
+                            plat.to_domain(allergy_check_status=AllergyCheckStatus.REGENERATED)
+                            for plat in safe_plats
+                        ],
+                        notes_generales=note,
+                    )
+                working_messages.append(
+                    _tool_error_message(tool_call.id, _violation_message(violations))
                 )
+                continue
 
-            if attempt == MAX_ATTEMPTS - 1:
-                # Out of attempts — resolve now rather than erroring out:
-                # keep whatever's safe, drop the rest, and say so.
-                dropped_names = [violation.plat.nom for violation in violations]
-                note = _dropped_note(plats_args.notes_generales, dropped_names)
-                return PlatsProposed(
-                    suggestions=[
-                        plat.to_domain(allergy_check_status=AllergyCheckStatus.REGENERATED)
-                        for plat in safe_plats
-                    ],
-                    notes_generales=note,
+            if not _selection_matches(safe_plats, selected_dish_names) and not last_attempt:
+                working_messages.append(
+                    _tool_error_message(
+                        tool_call.id, _selection_mismatch_message(selected_dish_names)
+                    )
                 )
+                continue
 
-            working_messages.append(
-                _tool_error_message(tool_call.id, _violation_message(violations))
+            return PlatsProposed(
+                suggestions=[plat.to_domain(allergy_check_status=status) for plat in safe_plats],
+                notes_generales=plats_args.notes_generales,
             )
-            continue
 
         working_messages.append(_assistant_message(tool_call_param))
         working_messages.append(
             _tool_error_message(
-                tool_call.id, f"Unknown tool '{tool_call.function.name}' — use one of the two."
+                tool_call.id, f"Unknown tool '{tool_call.function.name}' — use `proposer_plats`."
+            )
+        )
+
+    raise AgentResponseInvalidError(
+        f"The model failed to produce a valid tool call after {MAX_ATTEMPTS} attempts."
+    )
+
+
+def run_ideas(
+    *,
+    token: str,
+    model: str,
+    messages: list[ChatCompletionMessageParam],
+) -> IdeasLoopResult:
+    """`IDEAS` phase: a shortlist of dish ideas for the user to pick from —
+    no allergy check here (nothing to check yet, see `agent/allergy_check.py`
+    which operates on ingredients), that only happens once `run()` generates
+    the full recipe for whatever gets selected."""
+    tools = build_tools(AgentRunPhase.IDEAS)
+    working_messages = list(messages)
+
+    for _attempt in range(MAX_ATTEMPTS):
+        message = client.complete_with_tools(
+            token=token, model=model, messages=working_messages, tools=tools
+        )
+
+        if not message.tool_calls:
+            working_messages.append({"role": "assistant", "content": message.content or ""})
+            working_messages.append(_retry_nudge_message())
+            continue
+
+        tool_call = message.tool_calls[0]
+        if not isinstance(tool_call, ChatCompletionMessageFunctionToolCall):
+            working_messages.append(_retry_nudge_message())
+            continue
+
+        tool_call_param = _to_tool_call_param(tool_call)
+
+        if tool_call.function.name == DEMANDER_PRECISION:
+            try:
+                precision_args = DemanderPrecisionArgs.model_validate_json(
+                    tool_call.function.arguments
+                )
+            except (ValidationError, ValueError) as exc:
+                working_messages.append(_assistant_message(tool_call_param))
+                working_messages.append(_tool_error_message(tool_call.id, exc))
+                continue
+            working_messages.append(_assistant_message(tool_call_param))
+            return ClarificationNeeded(
+                question=precision_args.question,
+                options=precision_args.options,
+                messages=working_messages,
+            )
+
+        if tool_call.function.name == PROPOSER_IDEES:
+            try:
+                idees_args = ProposerIdeesArgs.model_validate_json(tool_call.function.arguments)
+            except (ValidationError, ValueError) as exc:
+                working_messages.append(_assistant_message(tool_call_param))
+                working_messages.append(_tool_error_message(tool_call.id, exc))
+                continue
+
+            working_messages.append(_assistant_message(tool_call_param))
+            return IdeasProposed(
+                ideas=[idee.to_domain() for idee in idees_args.idees],
+                notes_generales=idees_args.notes_generales,
+                messages=working_messages,
+            )
+
+        working_messages.append(_assistant_message(tool_call_param))
+        working_messages.append(
+            _tool_error_message(
+                tool_call.id, f"Unknown tool '{tool_call.function.name}' — use `proposer_idees`."
             )
         )
 
@@ -165,12 +277,13 @@ def stream_run(
     model: str,
     messages: list[ChatCompletionMessageParam],
     allergies: list[Allergy],
+    selected_dish_names: list[str],
     reasoning_callback: Callable[[str], None],
 ) -> LoopResult:
-    """Same tool-calling loop as `run()`, but streams reasoning tokens
+    """Same `RECIPES`-phase loop as `run()`, but streams reasoning tokens
     via `reasoning_callback` during each model call.
     """
-    tools = build_tools()
+    tools = build_tools(AgentRunPhase.RECIPES)
     working_messages = list(messages)
 
     for attempt in range(MAX_ATTEMPTS):
@@ -221,39 +334,126 @@ def stream_run(
                 continue
 
             working_messages.append(_assistant_message(tool_call_param))
+            last_attempt = attempt == MAX_ATTEMPTS - 1
             status = AllergyCheckStatus.OK if attempt == 0 else AllergyCheckStatus.REGENERATED
 
             safe_plats, violations = allergy_check.check_all(plats_args.plats, allergies)
 
-            if not violations:
-                return PlatsProposed(
-                    suggestions=[
-                        plat.to_domain(allergy_check_status=status) for plat in safe_plats
-                    ],
-                    notes_generales=plats_args.notes_generales,
+            if violations:
+                if last_attempt:
+                    dropped_names = [violation.plat.nom for violation in violations]
+                    note = _dropped_note(plats_args.notes_generales, dropped_names)
+                    return PlatsProposed(
+                        suggestions=[
+                            plat.to_domain(allergy_check_status=AllergyCheckStatus.REGENERATED)
+                            for plat in safe_plats
+                        ],
+                        notes_generales=note,
+                    )
+                working_messages.append(
+                    _tool_error_message(tool_call.get("id", ""), _violation_message(violations))
                 )
+                continue
 
-            if attempt == MAX_ATTEMPTS - 1:
-                dropped_names = [violation.plat.nom for violation in violations]
-                note = _dropped_note(plats_args.notes_generales, dropped_names)
-                return PlatsProposed(
-                    suggestions=[
-                        plat.to_domain(allergy_check_status=AllergyCheckStatus.REGENERATED)
-                        for plat in safe_plats
-                    ],
-                    notes_generales=note,
+            if not _selection_matches(safe_plats, selected_dish_names) and not last_attempt:
+                working_messages.append(
+                    _tool_error_message(
+                        tool_call.get("id", ""), _selection_mismatch_message(selected_dish_names)
+                    )
                 )
+                continue
 
-            working_messages.append(
-                _tool_error_message(tool_call.get("id", ""), _violation_message(violations))
+            return PlatsProposed(
+                suggestions=[plat.to_domain(allergy_check_status=status) for plat in safe_plats],
+                notes_generales=plats_args.notes_generales,
             )
-            continue
 
         working_messages.append(_assistant_message(tool_call_param))
         working_messages.append(
             _tool_error_message(
                 tool_call.get("id", ""),
-                f"Unknown tool '{tool_call.get('function', {}).get('name')}' — use one of the two.",
+                f"Unknown tool '{tool_call.get('function', {}).get('name')}' — "
+                "use `proposer_plats`.",
+            )
+        )
+
+    raise AgentResponseInvalidError(
+        f"The model failed to produce a valid tool call after {MAX_ATTEMPTS} attempts."
+    )
+
+
+def stream_run_ideas(
+    *,
+    token: str,
+    model: str,
+    messages: list[ChatCompletionMessageParam],
+    reasoning_callback: Callable[[str], None],
+) -> IdeasLoopResult:
+    """Same `IDEAS`-phase loop as `run_ideas()`, but streams reasoning
+    tokens via `reasoning_callback` during each model call."""
+    tools = build_tools(AgentRunPhase.IDEAS)
+    working_messages = list(messages)
+
+    for _attempt in range(MAX_ATTEMPTS):
+        message = client.stream_complete_with_tools(
+            token=token,
+            model=model,
+            messages=working_messages,
+            tools=tools,
+            reasoning_callback=reasoning_callback,
+        )
+
+        if not message.tool_calls:
+            working_messages.append({"role": "assistant", "content": message.content or ""})
+            working_messages.append(_retry_nudge_message())
+            continue
+
+        tool_call = message.tool_calls[0]
+        if not isinstance(tool_call, dict) or tool_call.get("type") != "function":
+            working_messages.append(_retry_nudge_message())
+            continue
+
+        tool_call_param = _to_tool_call_param_stream(tool_call)
+
+        if tool_call.get("function", {}).get("name") == DEMANDER_PRECISION:
+            try:
+                precision_args = DemanderPrecisionArgs.model_validate_json(
+                    tool_call["function"]["arguments"]
+                )
+            except (ValidationError, ValueError) as exc:
+                working_messages.append(_assistant_message(tool_call_param))
+                working_messages.append(_tool_error_message(tool_call.get("id", ""), exc))
+                continue
+            working_messages.append(_assistant_message(tool_call_param))
+            return ClarificationNeeded(
+                question=precision_args.question,
+                options=precision_args.options,
+                messages=working_messages,
+            )
+
+        if tool_call.get("function", {}).get("name") == PROPOSER_IDEES:
+            try:
+                idees_args = ProposerIdeesArgs.model_validate_json(
+                    tool_call["function"]["arguments"]
+                )
+            except (ValidationError, ValueError) as exc:
+                working_messages.append(_assistant_message(tool_call_param))
+                working_messages.append(_tool_error_message(tool_call.get("id", ""), exc))
+                continue
+
+            working_messages.append(_assistant_message(tool_call_param))
+            return IdeasProposed(
+                ideas=[idee.to_domain() for idee in idees_args.idees],
+                notes_generales=idees_args.notes_generales,
+                messages=working_messages,
+            )
+
+        working_messages.append(_assistant_message(tool_call_param))
+        working_messages.append(
+            _tool_error_message(
+                tool_call.get("id", ""),
+                f"Unknown tool '{tool_call.get('function', {}).get('name')}' — "
+                "use `proposer_idees`.",
             )
         )
 
@@ -263,7 +463,7 @@ def stream_run(
 
 
 def _to_tool_call_param_stream(
-    tool_call: dict,
+    tool_call: dict[str, Any],
 ) -> ChatCompletionMessageToolCallParam:
     return {
         "id": tool_call.get("id", ""),
@@ -278,6 +478,20 @@ def _violation_message(violations: list[allergy_check.Violation]) -> str:
         f"The following dish(es) violate a strict household allergy and cannot be shown: "
         f"{details}. Call `proposer_plats` again with corrected dishes that avoid every "
         "listed allergy entirely."
+    )
+
+
+def _selection_matches(plats: list[PlatArgs], selected_dish_names: list[str]) -> bool:
+    returned = {plat.nom.strip().casefold() for plat in plats}
+    expected = {name.strip().casefold() for name in selected_dish_names}
+    return returned == expected
+
+
+def _selection_mismatch_message(selected_dish_names: list[str]) -> str:
+    names = ", ".join(f'"{name}"' for name in selected_dish_names)
+    return (
+        f"The user selected exactly these dishes: {names}. Call `proposer_plats` again "
+        "with the full recipe for exactly these dishes, in this order, and no others."
     )
 
 
@@ -298,8 +512,7 @@ def _retry_nudge_message() -> ChatCompletionMessageParam:
     return {
         "role": "user",
         "content": (
-            "You must respond by calling either the `demander_precision` or "
-            "`proposer_plats` tool — not with plain text."
+            "You must respond by calling one of the available tools — not with plain text."
         ),
     }
 
@@ -335,8 +548,9 @@ def _tool_error_message(tool_call_id: str, error: object) -> ChatCompletionMessa
 
 
 def build_tool_result_message(tool_call_id: str, content: str) -> ChatCompletionMessageParam:
-    """Used by `respond()` to append the user's answer as the tool result
-    for a pending `demander_precision` call before resuming the loop.
+    """Used by `respond()` to append the user's clarification answer, and by
+    `select()` to append the user's dish selection, as the tool result for
+    the pending call before resuming the loop.
     """
     return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
 
@@ -344,7 +558,8 @@ def build_tool_result_message(tool_call_id: str, content: str) -> ChatCompletion
 def pending_tool_call_id(messages: list[ChatCompletionMessageParam]) -> str:
     """Extracts the tool_call id awaiting a response from a persisted
     conversation — always the last message, an assistant tool call (see
-    `ClarificationNeeded.messages`), by construction.
+    `ClarificationNeeded.messages` / `IdeasProposed.messages`), by
+    construction.
     """
     last = messages[-1]
     tool_calls = last.get("tool_calls") if isinstance(last, dict) else None

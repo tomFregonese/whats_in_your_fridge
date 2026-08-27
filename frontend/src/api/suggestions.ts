@@ -20,11 +20,21 @@ export interface Suggestion {
   servings: number;
 }
 
+/** One proposed dish idea — name + description only, no ingredients/steps
+ * yet (see `DishIdeaSelector`). `index` is its position in the proposed
+ * shortlist, and the key `selectIdeas`/`selectIdeasStream` select by. */
+export interface DishIdea {
+  index: number;
+  dish_name: string;
+  description: string;
+}
+
 export interface SuggestionsResult {
-  status: "completed" | "clarification_needed";
+  status: "completed" | "clarification_needed" | "ideas_proposed";
   fridge_input_id: number;
   meal_plan_id: number | null;
   suggestions: Suggestion[];
+  ideas: DishIdea[];
   notes_generales: string | null;
   run_id: number | null;
   question: string | null;
@@ -37,6 +47,15 @@ export function createSuggestions(payload: FridgeInputPayload): Promise<Suggesti
 
 export function respondToClarification(runId: number, answer: string): Promise<SuggestionsResult> {
   return api.post<SuggestionsResult>(`/api/suggestions/runs/${String(runId)}/respond`, { answer });
+}
+
+export function selectIdeas(
+  runId: number,
+  selectedIndexes: number[],
+): Promise<SuggestionsResult> {
+  return api.post<SuggestionsResult>(`/api/suggestions/runs/${String(runId)}/select`, {
+    selected_indexes: selectedIndexes,
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -53,4 +72,13 @@ export function createSuggestionsStream(payload: FridgeInputPayload): Promise<St
 
 export function respondToClarificationStream(runId: number, answer: string): Promise<{ status: string }> {
   return api.post<{ status: string }>(`/api/suggestions/runs/${String(runId)}/respond-stream`, { answer });
+}
+
+export function selectIdeasStream(
+  runId: number,
+  selectedIndexes: number[],
+): Promise<{ status: string }> {
+  return api.post<{ status: string }>(`/api/suggestions/runs/${String(runId)}/select-stream`, {
+    selected_indexes: selectedIndexes,
+  });
 }

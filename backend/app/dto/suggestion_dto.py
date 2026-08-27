@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.domain.suggestion import MealPlan, Suggestion
+from app.dto.dish_idea_dto import DishIdeaDtoOut
 
 
 class SuggestionDtoOut(BaseModel):
@@ -44,13 +45,16 @@ class SuggestionsResultDtoOut(BaseModel):
     `meal_plan_id` is only set for `completed` — the frontend uses it to
     navigate to `/plan/{id}` (backed by `GET /api/meal-plans/{id}`, the
     same read `MealPlanHistory` uses), rather than rendering the inline
-    `suggestions` directly.
+    `suggestions` directly. `ideas` is only set for `ideas_proposed` — the
+    `IDEAS`-phase shortlist the user must pick from via
+    `POST .../runs/{run_id}/select` before a `completed` result exists.
     """
 
-    status: Literal["completed", "clarification_needed"]
+    status: Literal["completed", "clarification_needed", "ideas_proposed"]
     fridge_input_id: int
     meal_plan_id: int | None = None
     suggestions: list[SuggestionDtoOut] = Field(default_factory=list)
+    ideas: list[DishIdeaDtoOut] = Field(default_factory=list)
     notes_generales: str | None = None
     run_id: int | None = None
     question: str | None = None
@@ -59,6 +63,13 @@ class SuggestionsResultDtoOut(BaseModel):
 
 class RespondDtoIn(BaseModel):
     answer: str = Field(min_length=1)
+
+
+class SelectDtoIn(BaseModel):
+    """The indexes (see `DishIdeaDtoOut.index`) of the ideas the user picked
+    from an `ideas_proposed` result."""
+
+    selected_indexes: list[int] = Field(min_length=1)
 
 
 class MealPlanDtoOut(BaseModel):

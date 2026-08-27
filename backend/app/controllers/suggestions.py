@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from openai.types.chat import ChatCompletionMessageParam
 from starlette.requests import Request
 
-from app.agent import loop, prompts
+from app.agent import prompts
+from app.agent.dedup import DedupProvider
 from app.dependencies import (
     get_agent_run_repository,
     get_allergy_repository,
@@ -14,27 +16,31 @@ from app.dependencies import (
     get_suggestion_repository,
     get_suggestion_service,
 )
+from app.domain.agent_run import AgentRunPhase
+from app.dto.dish_idea_dto import DishIdeaDtoOut
 from app.dto.feedback_dto import FeedbackDtoIn, FeedbackDtoOut
 from app.dto.fridge_input_dto import FridgeInputDtoIn
-from app.dto.suggestion_dto import RespondDtoIn, SuggestionDtoOut, SuggestionsResultDtoOut
+from app.dto.suggestion_dto import (
+    RespondDtoIn,
+    SelectDtoIn,
+    SuggestionDtoOut,
+    SuggestionsResultDtoOut,
+)
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
-from app.services.exceptions import (
-    ModelNotConfiguredError,
-    ModelUnavailableError,
-    NotFoundError,
-)
+from app.services.exceptions import ModelNotConfiguredError, NotFoundError
 from app.services.feedback_service import FeedbackService
 from app.services.settings_service import SettingsService
 from app.services.suggestion_service import (
     ClarificationOutcome,
+    IdeasOutcome,
     SuggestionOutcome,
     SuggestionService,
 )
-from app.streaming_service import deliver_answer, sse_generator, start_background
+from app.streaming_service import deliver_answer, deliver_selection, sse_generator, start_background
 
 router = APIRouter(prefix="/suggestions", tags=["suggestions"])
 
@@ -47,6 +53,16 @@ def _to_dto(fridge_input_id: int, outcome: SuggestionOutcome) -> SuggestionsResu
             run_id=outcome.run_id,
             question=outcome.question,
             options=outcome.options,
+        )
+    if isinstance(outcome, IdeasOutcome):
+        return SuggestionsResultDtoOut(
+            status="ideas_proposed",
+            fridge_input_id=fridge_input_id,
+            run_id=outcome.run_id,
+            ideas=[
+                DishIdeaDtoOut.from_domain(index, idea) for index, idea in enumerate(outcome.ideas)
+            ],
+            notes_generales=outcome.notes_generales,
         )
     return SuggestionsResultDtoOut(
         status="completed",
@@ -76,6 +92,16 @@ def respond_to_clarification(
     return _to_dto(fridge_input_id, outcome)
 
 
+@router.post("/runs/{run_id}/select")
+def select_ideas(
+    run_id: int,
+    dto: SelectDtoIn,
+    service: SuggestionService = Depends(get_suggestion_service),
+) -> SuggestionsResultDtoOut:
+    fridge_input_id, outcome = service.select(run_id, dto.selected_indexes)
+    return _to_dto(fridge_input_id, outcome)
+
+
 # ---------------------------------------------------------------------------
 # Streaming entry point
 # POST /api/suggestions/stream — kicks off a background generation and
@@ -94,8 +120,8 @@ def create_suggestions_stream(
     allergy_repository: AllergyRepository = Depends(get_allergy_repository),
     settings_service: SettingsService = Depends(get_settings_service),
     security_service: SecurityService = Depends(get_security_service),
-    dedup_provider=Depends(get_dedup_provider),
-) -> dict:
+    dedup_provider: DedupProvider = Depends(get_dedup_provider),
+) -> dict[str, int]:
     fridge_input = dto.to_domain()
     saved_input = fridge_input_repository.add(fridge_input)
     assert saved_input.id is not None
@@ -111,8 +137,10 @@ def create_suggestions_stream(
         allergies=allergy_repository.list_all(),
         preferences=[],
         dedup_context=dedup_provider.get_exclusion_context(),
+        phase=AgentRunPhase.IDEAS,
+        mode=saved_input.mode,
     )
-    messages: list[dict] = [
+    messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompts.build_user_message(saved_input)},
     ]
@@ -125,7 +153,6 @@ def create_suggestions_stream(
         run_id=run_id,
         fridge_input=saved_input,
         messages=messages,
-        existing_run_id=None,
         token=token,
         model=settings.openrouter_model_id,
         allergies=allergies,
@@ -166,11 +193,28 @@ async def stream_events(run_id: int) -> StreamingResponse:
 
 
 @router.post("/runs/{run_id}/respond-stream")
-def respond_stream(run_id: int, dto: RespondDtoIn) -> dict:
+def respond_stream(run_id: int, dto: RespondDtoIn) -> dict[str, str]:
     try:
         deliver_answer(run_id, dto.answer)
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail=f"No active streaming session for run {run_id}.")
+    except NotFoundError as exc:
+        detail = f"No active streaming session for run {run_id}."
+        raise HTTPException(status_code=404, detail=detail) from exc
+    return {"status": "accepted"}
+
+
+# ---------------------------------------------------------------------------
+# Dish selection in streaming mode
+# POST /api/suggestions/runs/{run_id}/select-stream
+# ---------------------------------------------------------------------------
+
+
+@router.post("/runs/{run_id}/select-stream")
+def select_stream(run_id: int, dto: SelectDtoIn) -> dict[str, str]:
+    try:
+        deliver_selection(run_id, dto.selected_indexes)
+    except NotFoundError as exc:
+        detail = f"No active streaming session for run {run_id}."
+        raise HTTPException(status_code=404, detail=detail) from exc
     return {"status": "accepted"}
 
 

@@ -13,6 +13,7 @@ import json
 
 from pydantic import BaseModel, Field
 
+from app.domain.dish_idea import DishIdea
 from app.domain.suggestion import AllergyCheckStatus, Suggestion
 
 
@@ -61,7 +62,28 @@ class PlatArgs(BaseModel):
 
 
 class ProposerPlatsArgs(BaseModel):
-    """Arguments for the `proposer_plats` tool — the "final answer" contract."""
+    """Arguments for the `proposer_plats` tool — the "final answer" contract
+    of the `RECIPES` phase."""
 
     plats: list[PlatArgs] = Field(min_length=1)
+    notes_generales: str | None = None
+
+
+class IdeeArgs(BaseModel):
+    """One dish idea — name and a one-line description only, deliberately
+    without ingredients or steps (those only exist once `ProposerPlatsArgs`
+    is generated for whichever idea(s) the user picks)."""
+
+    nom: str = Field(min_length=1)
+    description: str
+
+    def to_domain(self) -> DishIdea:
+        return DishIdea(dish_name=self.nom, description=self.description)
+
+
+class ProposerIdeesArgs(BaseModel):
+    """Arguments for the `proposer_idees` tool — the "final answer" contract
+    of the `IDEAS` phase."""
+
+    idees: list[IdeeArgs] = Field(min_length=1)
     notes_generales: str | None = None

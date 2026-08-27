@@ -3,6 +3,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.agent import loop
+from app.domain.dish_idea import DishIdea
 from app.domain.suggestion import AllergyCheckStatus, Suggestion
 
 PASSWORD = "correct horse battery staple"
@@ -23,9 +24,29 @@ def _setup(client: TestClient) -> None:
 
 
 def _create_suggestion(client: TestClient, dish_name: str = "Carrot soup") -> int:
-    """Runs the real (mocked-loop) generation flow to get a real, persisted
-    suggestion id — feedback always targets a real `suggestion.id`.
+    """Runs the real (mocked-loop) generation flow — IDEAS phase then
+    selection — to get a real, persisted suggestion id — feedback always
+    targets a real `suggestion.id`.
     """
+    ideas = loop.IdeasProposed(
+        ideas=[DishIdea(dish_name=dish_name, description="Simple soup")],
+        notes_generales=None,
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "proposer_idees", "arguments": "{}"},
+                    }
+                ],
+            },
+        ],
+    )
     plats = loop.PlatsProposed(
         suggestions=[
             Suggestion(
@@ -43,11 +64,20 @@ def _create_suggestion(client: TestClient, dish_name: str = "Carrot soup") -> in
     )
     with (
         patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run_ideas", return_value=ideas),
+    ):
+        first = client.post(
+            "/api/suggestions",
+            json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]},
+        )
+    run_id = first.json()["run_id"]
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
         patch("app.services.suggestion_service.loop.run", return_value=plats),
     ):
         response = client.post(
-            "/api/suggestions",
-            json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]},
+            f"/api/suggestions/runs/{run_id}/select", json={"selected_indexes": [0]}
         )
     suggestion_id: int = response.json()["suggestions"][0]["id"]
     return suggestion_id

@@ -64,7 +64,32 @@ MIXED_PLATS_ARGS = json.dumps(
     }
 )
 
+MISMATCHED_PLATS_ARGS = json.dumps(
+    {
+        "plats": [
+            {
+                "nom": "Tomato soup",
+                "description": "A different soup entirely",
+                "portions": 4,
+                "ingredients": [{"nom": "tomato", "quantite": "3"}],
+                "etapes": ["Boil.", "Blend."],
+            }
+        ],
+        "notes_generales": None,
+    }
+)
+
 VALID_PRECISION_ARGS = json.dumps({"question": "How many people?", "options": ["2", "4"]})
+
+VALID_IDEES_ARGS = json.dumps(
+    {
+        "idees": [
+            {"nom": "Carrot soup", "description": "Simple soup"},
+            {"nom": "Tomato soup", "description": "Another soup"},
+        ],
+        "notes_generales": None,
+    }
+)
 
 
 def _tool_call(call_id: str, name: str, arguments: str) -> ChatCompletionMessageFunctionToolCall:
@@ -92,10 +117,22 @@ def _messages() -> list[ChatCompletionMessageParam]:
     return [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
 
 
-def _run(*, allergies: list[Allergy] | None = None) -> loop.LoopResult:
+def _run(
+    *, allergies: list[Allergy] | None = None, selected_dish_names: list[str] | None = None
+) -> loop.LoopResult:
     return loop.run(
-        token="tok", model="m", messages=_messages(), allergies=allergies if allergies else []
+        token="tok",
+        model="m",
+        messages=_messages(),
+        allergies=allergies if allergies else [],
+        selected_dish_names=(
+            selected_dish_names if selected_dish_names is not None else ["Carrot soup"]
+        ),
     )
+
+
+def _run_ideas() -> loop.IdeasLoopResult:
+    return loop.run_ideas(token="tok", model="m", messages=_messages())
 
 
 def test_loop_returns_plats_proposed_on_valid_tool_call() -> None:
@@ -176,7 +213,7 @@ def test_loop_treats_unknown_tool_as_retryable() -> None:
 def test_loop_passes_through_clean_dish_with_no_allergies_configured() -> None:
     message = _message(tool_calls=[_tool_call("call_1", "proposer_plats", VIOLATING_PLATS_ARGS)])
     with patch("app.agent.loop.client.complete_with_tools", return_value=message):
-        result = _run(allergies=[])
+        result = _run(allergies=[], selected_dish_names=["Peanut satay"])
 
     assert isinstance(result, loop.PlatsProposed)
     assert result.suggestions[0].dish_name == "Peanut satay"
@@ -211,7 +248,7 @@ def test_loop_drops_dish_that_keeps_violating_after_all_retries() -> None:
     with patch(
         "app.agent.loop.client.complete_with_tools", return_value=bad
     ) as mock_complete:
-        result = _run(allergies=PEANUT_ALLERGY)
+        result = _run(allergies=PEANUT_ALLERGY, selected_dish_names=["Peanut satay"])
 
     assert isinstance(result, loop.PlatsProposed)
     assert result.suggestions == []
@@ -223,12 +260,96 @@ def test_loop_drops_dish_that_keeps_violating_after_all_retries() -> None:
 def test_loop_keeps_safe_dishes_and_drops_only_the_violating_one() -> None:
     bad = _message(tool_calls=[_tool_call("call_1", "proposer_plats", MIXED_PLATS_ARGS)])
     with patch("app.agent.loop.client.complete_with_tools", return_value=bad):
-        result = _run(allergies=PEANUT_ALLERGY)
+        result = _run(allergies=PEANUT_ALLERGY, selected_dish_names=["Carrot soup", "Peanut satay"])
 
     assert isinstance(result, loop.PlatsProposed)
     dish_names = [s.dish_name for s in result.suggestions]
     assert dish_names == ["Carrot soup"]
     assert "Peanut satay" in (result.notes_generales or "")
+
+
+# --- Selection-match validation (two-phase dish selection) ---
+
+
+def test_loop_retries_when_recipe_does_not_match_selection() -> None:
+    mismatched = _message(
+        tool_calls=[_tool_call("call_1", "proposer_plats", MISMATCHED_PLATS_ARGS)]
+    )
+    good = _message(tool_calls=[_tool_call("call_2", "proposer_plats", VALID_PLATS_ARGS)])
+    with patch(
+        "app.agent.loop.client.complete_with_tools", side_effect=[mismatched, good]
+    ) as mock_complete:
+        result = _run(selected_dish_names=["Carrot soup"])
+
+    assert isinstance(result, loop.PlatsProposed)
+    assert result.suggestions[0].dish_name == "Carrot soup"
+    assert result.suggestions[0].allergy_check_status == AllergyCheckStatus.REGENERATED
+    assert mock_complete.call_count == 2
+
+    final_messages = mock_complete.call_args_list[-1].kwargs["messages"]
+    tool_feedback = [m["content"] for m in final_messages if m.get("role") == "tool"]
+    assert any(fb and "Carrot soup" in fb for fb in tool_feedback)
+
+
+def test_loop_accepts_mismatched_recipe_after_exhausting_retries() -> None:
+    mismatched = _message(
+        tool_calls=[_tool_call("call_1", "proposer_plats", MISMATCHED_PLATS_ARGS)]
+    )
+    with patch(
+        "app.agent.loop.client.complete_with_tools", return_value=mismatched
+    ) as mock_complete:
+        result = _run(selected_dish_names=["Carrot soup"])
+
+    assert isinstance(result, loop.PlatsProposed)
+    assert result.suggestions[0].dish_name == "Tomato soup"
+    assert mock_complete.call_count == loop.MAX_ATTEMPTS
+
+
+# --- IDEAS phase (`run_ideas`) ---
+
+
+def test_run_ideas_returns_ideas_proposed_on_valid_tool_call() -> None:
+    message = _message(tool_calls=[_tool_call("call_1", "proposer_idees", VALID_IDEES_ARGS)])
+    with patch("app.agent.loop.client.complete_with_tools", return_value=message) as mock_complete:
+        result = _run_ideas()
+
+    assert isinstance(result, loop.IdeasProposed)
+    assert [idea.dish_name for idea in result.ideas] == ["Carrot soup", "Tomato soup"]
+    mock_complete.assert_called_once()
+
+
+def test_run_ideas_returns_clarification_needed_on_valid_tool_call() -> None:
+    message = _message(
+        tool_calls=[_tool_call("call_1", "demander_precision", VALID_PRECISION_ARGS)]
+    )
+    with patch("app.agent.loop.client.complete_with_tools", return_value=message):
+        result = _run_ideas()
+
+    assert isinstance(result, loop.ClarificationNeeded)
+    assert result.question == "How many people?"
+
+
+def test_run_ideas_retries_on_invalid_json_then_succeeds() -> None:
+    bad = _message(tool_calls=[_tool_call("call_1", "proposer_idees", "{not valid json")])
+    good = _message(tool_calls=[_tool_call("call_2", "proposer_idees", VALID_IDEES_ARGS)])
+    with patch(
+        "app.agent.loop.client.complete_with_tools", side_effect=[bad, good]
+    ) as mock_complete:
+        result = _run_ideas()
+
+    assert isinstance(result, loop.IdeasProposed)
+    assert mock_complete.call_count == 2
+
+
+def test_run_ideas_raises_after_exhausting_retries() -> None:
+    bad = _message(tool_calls=[_tool_call("call_1", "proposer_idees", "{not valid json")])
+    with (
+        patch("app.agent.loop.client.complete_with_tools", return_value=bad) as mock_complete,
+        pytest.raises(AgentResponseInvalidError),
+    ):
+        _run_ideas()
+
+    assert mock_complete.call_count == loop.MAX_ATTEMPTS
 
 
 def test_pending_tool_call_id_extracts_from_last_message() -> None:
