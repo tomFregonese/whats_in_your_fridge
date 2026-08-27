@@ -742,3 +742,123 @@ textarea:focus {
   gap: var(--space-2);
   margin-bottom: var(--space-5);
 }
+
+/* ---------- Reasoning block (streaming) ---------- */
+
+.reasoning-block {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-5);
+  overflow: hidden;
+}
+
+.reasoning-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-hover);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.reasoning-icon {
+  flex-shrink: 0;
+}
+
+.reasoning-label {
+  color: var(--color-text-muted);
+}
+
+.reasoning-dots {
+  display: inline-flex;
+  gap: 0.15rem;
+  margin-left: auto;
+}
+
+.reasoning-dots span {
+  animation: reasoning-bounce 1.4s ease-in-out infinite;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--color-primary);
+}
+
+.reasoning-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.reasoning-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes reasoning-bounce {
+  0%, 80%, 100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.reasoning-content {
+  padding: var(--space-3) var(--space-4);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  max-height: 12rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reasoning-cursor {
+  animation: reasoning-blink 1s step-end infinite;
+  color: var(--color-primary);
+}
+
+@keyframes reasoning-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ---------- Connection status indicator ---------- */
+
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.connection-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.connection-dot.ok {
+  background: var(--color-success);
+  box-shadow: 0 0 4px var(--color-success);
+}
+
+.connection-dot.fail {
+  background: var(--color-danger);
+  box-shadow: 0 0 4px var(--color-danger);
+}
+
+.connection-dot.pending {
+  background: var(--color-text-muted);
+  animation: reasoning-blink 1s step-end infinite;
+}
+
+.connection-test-btn {
+  margin-left: auto;
+}

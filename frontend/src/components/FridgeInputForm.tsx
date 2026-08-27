@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import type { SuggestionsResult } from "../api/suggestions";
-import { createSuggestions, respondToClarification } from "../api/suggestions";
+import { createSuggestionsStream, respondToClarificationStream } from "../api/suggestions";
 import { ApiErrorMessage } from "./ApiErrorMessage";
 import { ClarificationModal } from "./ClarificationModal";
+import { ReasoningBlock } from "./ReasoningBlock";
 import type { IngredientEntry } from "./IngredientListInput";
 import { IngredientListInput } from "./IngredientListInput";
 
@@ -12,6 +12,18 @@ interface PendingClarification {
   runId: number;
   question: string;
   options: string[] | null;
+}
+
+/** SSE event shape from the streaming endpoint */
+interface SseEvent {
+  type: "reasoning" | "clarification" | "completed" | "error" | "done";
+  content?: string;
+  run_id?: number;
+  question?: string;
+  options?: string[] | null;
+  meal_plan_id?: number;
+  notes_generales?: string | null;
+  detail?: string;
 }
 
 export function FridgeInputForm() {
@@ -22,60 +34,143 @@ export function FridgeInputForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [clarification, setClarification] = useState<PendingClarification | null>(null);
+  const [reasoning, setReasoning] = useState("");
+  const [streamingActive, setStreamingActive] = useState(false);
+  const runIdRef = useRef<number | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const clarifyingRef = useRef(false);
 
-  function handleResult(result: SuggestionsResult): void {
-    if (result.status === "clarification_needed" && result.run_id !== null && result.question) {
-      // Could itself be answered with *another* clarification — this just
-      // re-renders the modal with the new question in that case.
-      setClarification({ runId: result.run_id, question: result.question, options: result.options });
-      return;
+  /** Clean up the EventSource connection */
+  const cleanup = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
     }
-    setClarification(null);
-    if (result.meal_plan_id === null) return; // never happens for "completed" in practice
-    navigate(`/plan/${String(result.meal_plan_id)}`, {
-      state: { notesGenerales: result.notes_generales },
-    });
-  }
+    setStreamingActive(false);
+    clarifyingRef.current = false;
+  }, []);
 
-  async function handleSubmit(event: FormEvent): Promise<void> {
-    event.preventDefault();
-    if (ingredients.length === 0 && !freeText.trim()) {
-      setError("Add at least one ingredient or describe what's in your fridge.");
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const result = await createSuggestions({
-        mode,
-        free_text: freeText.trim() || undefined,
-        items: ingredients.map((item) => ({
-          ingredient_name: item.name,
-          quantity_raw: item.quantity || undefined,
-        })),
-      });
-      handleResult(result);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  // Cleanup on unmount
+  useEffect(() => cleanup, [cleanup]);
 
-  async function handleClarificationAnswer(answer: string): Promise<void> {
-    if (!clarification) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const result = await respondToClarification(clarification.runId, answer);
-      handleResult(result);
-    } catch (err) {
+  /** Handle a single SSE event — called synchronously from the message handler. */
+  const handleSseEvent = useCallback(
+    (event: SseEvent): void => {
+      switch (event.type) {
+        case "reasoning":
+          setReasoning((prev) => prev + (event.content ?? ""));
+          break;
+
+        case "clarification": {
+          const q = event.question ?? "";
+          const opts = event.options ?? null;
+          const rid = event.run_id ?? 0;
+          clarifyingRef.current = true;
+          setClarification({ runId: rid, question: q, options: opts });
+          break;
+        }
+
+        case "completed":
+          clarifyingRef.current = false;
+          setClarification(null);
+          setStreamingActive(false);
+          if (event.meal_plan_id) {
+            navigate(`/plan/${String(event.meal_plan_id)}`, {
+              state: { notesGenerales: event.notes_generales ?? null },
+            });
+          }
+          break;
+
+        case "error":
+          setError(new Error(event.detail ?? "An unknown error occurred."));
+          setStreamingActive(false);
+          break;
+
+        case "done":
+          setStreamingActive(false);
+          clarifyingRef.current = false;
+          break;
+      }
+    },
+    [navigate],
+  );
+
+  /** Called when the user answers a clarification question via the modal */
+  const handleClarificationAnswer = useCallback(
+    async (answer: string) => {
+      const runId = runIdRef.current;
+      if (!runId) return;
       setClarification(null);
-      setError(err);
-    } finally {
-      setSubmitting(false);
-    }
-  }
+      clarifyingRef.current = false;
+      try {
+        await respondToClarificationStream(runId, answer);
+      } catch (err) {
+        setError(err);
+      }
+    },
+    [],
+  );
+
+  /** Start streaming: POST to create the stream, then open SSE */
+  const handleSubmit = useCallback(
+    async (event: FormEvent): Promise<void> => {
+      event.preventDefault();
+      if (ingredients.length === 0 && !freeText.trim()) {
+        setError("Add at least one ingredient or describe what's in your fridge.");
+        return;
+      }
+
+      setSubmitting(true);
+      setError(null);
+      setReasoning("");
+      setClarification(null);
+      cleanup();
+
+      try {
+        const { run_id } = await createSuggestionsStream({
+          mode,
+          free_text: freeText.trim() || undefined,
+          items: ingredients.map((item) => ({
+            ingredient_name: item.name,
+            quantity_raw: item.quantity || undefined,
+          })),
+        });
+
+        runIdRef.current = run_id;
+        setStreamingActive(true);
+        setSubmitting(false);
+
+        // Open a single SSE connection for the entire run
+        const es = new EventSource(`/api/suggestions/runs/${String(run_id)}/events`);
+        eventSourceRef.current = es;
+
+        es.onmessage = (msg: MessageEvent) => {
+          try {
+            const event: SseEvent = JSON.parse(msg.data) as SseEvent;
+            handleSseEvent(event);
+            // Close the EventSource on terminal events so the browser
+            // doesn't loop endless reconnection attempts.
+            if (event.type === "done" || event.type === "error" || event.type === "completed") {
+              es.close();
+              eventSourceRef.current = null;
+            }
+          } catch {
+            // Ignore malformed SSE events
+          }
+        };
+
+        es.onerror = () => {
+          // The browser's EventSource auto-reconnects on transient errors.
+          // We rely on the backend sending a "done" or "error" event.
+        };
+      } catch (err) {
+        setError(err);
+        setSubmitting(false);
+        setStreamingActive(false);
+      }
+    },
+    [ingredients, freeText, mode, cleanup, handleSseEvent],
+  );
 
   return (
     <>
@@ -127,12 +222,17 @@ export function FridgeInputForm() {
         </form>
       </div>
 
+      {streamingActive && <ReasoningBlock reasoning={reasoning} active={true} />}
+      {reasoning && !streamingActive && !error && (
+        <ReasoningBlock reasoning={reasoning} active={false} />
+      )}
+
       {clarification && (
         <ClarificationModal
           question={clarification.question}
           options={clarification.options}
-          submitting={submitting}
-          onAnswer={(answer) => void handleClarificationAnswer(answer)}
+          submitting={false}
+          onAnswer={handleClarificationAnswer}
         />
       )}
     </>

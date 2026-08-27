@@ -1,5 +1,9 @@
 """The agent tool-calling loop.
 
+Two entry points:
+- `run()` — synchronous, non-streaming (existing callers).
+- `stream_run()` — same logic but streams reasoning tokens via callback.
+
 Calls the model with both tools and interprets the result: either a
 clarifying question (stop and wait for the user — see `ClarificationNeeded`)
 or a validated, allergy-checked set of proposed dishes (`PlatsProposed`).
@@ -14,6 +18,7 @@ changing this loop's shape).
 """
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from openai.types.chat import (
@@ -152,6 +157,119 @@ def run(
     raise AgentResponseInvalidError(
         f"The model failed to produce a valid tool call after {MAX_ATTEMPTS} attempts."
     )
+
+
+def stream_run(
+    *,
+    token: str,
+    model: str,
+    messages: list[ChatCompletionMessageParam],
+    allergies: list[Allergy],
+    reasoning_callback: Callable[[str], None],
+) -> LoopResult:
+    """Same tool-calling loop as `run()`, but streams reasoning tokens
+    via `reasoning_callback` during each model call.
+    """
+    tools = build_tools()
+    working_messages = list(messages)
+
+    for attempt in range(MAX_ATTEMPTS):
+        message = client.stream_complete_with_tools(
+            token=token,
+            model=model,
+            messages=working_messages,
+            tools=tools,
+            reasoning_callback=reasoning_callback,
+        )
+
+        if not message.tool_calls:
+            working_messages.append({"role": "assistant", "content": message.content or ""})
+            working_messages.append(_retry_nudge_message())
+            continue
+
+        tool_call = message.tool_calls[0]
+        if not isinstance(tool_call, dict) or tool_call.get("type") != "function":
+            working_messages.append(_retry_nudge_message())
+            continue
+
+        tool_call_param = _to_tool_call_param_stream(tool_call)
+
+        if tool_call.get("function", {}).get("name") == DEMANDER_PRECISION:
+            try:
+                precision_args = DemanderPrecisionArgs.model_validate_json(
+                    tool_call["function"]["arguments"]
+                )
+            except (ValidationError, ValueError) as exc:
+                working_messages.append(_assistant_message(tool_call_param))
+                working_messages.append(_tool_error_message(tool_call.get("id", ""), exc))
+                continue
+            working_messages.append(_assistant_message(tool_call_param))
+            return ClarificationNeeded(
+                question=precision_args.question,
+                options=precision_args.options,
+                messages=working_messages,
+            )
+
+        if tool_call.get("function", {}).get("name") == PROPOSER_PLATS:
+            try:
+                plats_args = ProposerPlatsArgs.model_validate_json(
+                    tool_call["function"]["arguments"]
+                )
+            except (ValidationError, ValueError) as exc:
+                working_messages.append(_assistant_message(tool_call_param))
+                working_messages.append(_tool_error_message(tool_call.get("id", ""), exc))
+                continue
+
+            working_messages.append(_assistant_message(tool_call_param))
+            status = AllergyCheckStatus.OK if attempt == 0 else AllergyCheckStatus.REGENERATED
+
+            safe_plats, violations = allergy_check.check_all(plats_args.plats, allergies)
+
+            if not violations:
+                return PlatsProposed(
+                    suggestions=[
+                        plat.to_domain(allergy_check_status=status) for plat in safe_plats
+                    ],
+                    notes_generales=plats_args.notes_generales,
+                )
+
+            if attempt == MAX_ATTEMPTS - 1:
+                dropped_names = [violation.plat.nom for violation in violations]
+                note = _dropped_note(plats_args.notes_generales, dropped_names)
+                return PlatsProposed(
+                    suggestions=[
+                        plat.to_domain(allergy_check_status=AllergyCheckStatus.REGENERATED)
+                        for plat in safe_plats
+                    ],
+                    notes_generales=note,
+                )
+
+            working_messages.append(
+                _tool_error_message(tool_call.get("id", ""), _violation_message(violations))
+            )
+            continue
+
+        working_messages.append(_assistant_message(tool_call_param))
+        working_messages.append(
+            _tool_error_message(
+                tool_call.get("id", ""),
+                f"Unknown tool '{tool_call.get('function', {}).get('name')}' — use one of the two.",
+            )
+        )
+
+    raise AgentResponseInvalidError(
+        f"The model failed to produce a valid tool call after {MAX_ATTEMPTS} attempts."
+    )
+
+
+def _to_tool_call_param_stream(
+    tool_call: dict,
+) -> ChatCompletionMessageToolCallParam:
+    return {
+        "id": tool_call.get("id", ""),
+        "type": "function",
+        "function": tool_call.get("function", {"name": "", "arguments": ""}),
+    }
 
 
 def _violation_message(violations: list[allergy_check.Violation]) -> str:

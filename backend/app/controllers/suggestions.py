@@ -1,15 +1,40 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from starlette.requests import Request
 
-from app.dependencies import get_feedback_service, get_suggestion_service
+from app.agent import loop, prompts
+from app.dependencies import (
+    get_agent_run_repository,
+    get_allergy_repository,
+    get_dedup_provider,
+    get_feedback_service,
+    get_fridge_input_repository,
+    get_security_service,
+    get_settings_service,
+    get_suggestion_repository,
+    get_suggestion_service,
+)
 from app.dto.feedback_dto import FeedbackDtoIn, FeedbackDtoOut
 from app.dto.fridge_input_dto import FridgeInputDtoIn
 from app.dto.suggestion_dto import RespondDtoIn, SuggestionDtoOut, SuggestionsResultDtoOut
+from app.persistence.repositories.agent_run_repository import AgentRunRepository
+from app.persistence.repositories.allergy_repository import AllergyRepository
+from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
+from app.persistence.repositories.suggestion_repository import SuggestionRepository
+from app.security.service import SecurityService
+from app.services.exceptions import (
+    ModelNotConfiguredError,
+    ModelUnavailableError,
+    NotFoundError,
+)
 from app.services.feedback_service import FeedbackService
+from app.services.settings_service import SettingsService
 from app.services.suggestion_service import (
     ClarificationOutcome,
     SuggestionOutcome,
     SuggestionService,
 )
+from app.streaming_service import deliver_answer, sse_generator, start_background
 
 router = APIRouter(prefix="/suggestions", tags=["suggestions"])
 
@@ -49,6 +74,104 @@ def respond_to_clarification(
 ) -> SuggestionsResultDtoOut:
     fridge_input_id, outcome = service.respond(run_id, dto.answer)
     return _to_dto(fridge_input_id, outcome)
+
+
+# ---------------------------------------------------------------------------
+# Streaming entry point
+# POST /api/suggestions/stream — kicks off a background generation and
+# returns the run_id so the client can connect to GET /runs/{id}/events
+# for SSE.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/stream", status_code=202)
+def create_suggestions_stream(
+    dto: FridgeInputDtoIn,
+    request: Request,
+    fridge_input_repository: FridgeInputRepository = Depends(get_fridge_input_repository),
+    agent_run_repository: AgentRunRepository = Depends(get_agent_run_repository),
+    suggestion_repository: SuggestionRepository = Depends(get_suggestion_repository),
+    allergy_repository: AllergyRepository = Depends(get_allergy_repository),
+    settings_service: SettingsService = Depends(get_settings_service),
+    security_service: SecurityService = Depends(get_security_service),
+    dedup_provider=Depends(get_dedup_provider),
+) -> dict:
+    fridge_input = dto.to_domain()
+    saved_input = fridge_input_repository.add(fridge_input)
+    assert saved_input.id is not None
+
+    settings = settings_service.get_settings()
+    if settings.openrouter_model_id is None:
+        raise ModelNotConfiguredError("No OpenRouter model has been selected yet.")
+
+    token = security_service.get_token()
+
+    system_prompt = prompts.build_system_prompt(
+        default_servings=settings.default_servings,
+        allergies=allergy_repository.list_all(),
+        preferences=[],
+        dedup_context=dedup_provider.get_exclusion_context(),
+    )
+    messages: list[dict] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompts.build_user_message(saved_input)},
+    ]
+
+    allergies = allergy_repository.list_all()
+
+    run_id = saved_input.id  # reuse the fridge_input id as the streaming run id
+
+    start_background(
+        run_id=run_id,
+        fridge_input=saved_input,
+        messages=messages,
+        existing_run_id=None,
+        token=token,
+        model=settings.openrouter_model_id,
+        allergies=allergies,
+        fridge_input_repository=fridge_input_repository,
+        agent_run_repository=agent_run_repository,
+        suggestion_repository=suggestion_repository,
+        settings_service=settings_service,
+        security_service=security_service,
+        dedup_provider=dedup_provider,
+    )
+
+    return {"run_id": run_id}
+
+
+# ---------------------------------------------------------------------------
+# SSE event stream
+# GET /api/suggestions/runs/{run_id}/events
+# ---------------------------------------------------------------------------
+
+
+@router.get("/runs/{run_id}/events")
+async def stream_events(run_id: int) -> StreamingResponse:
+    return StreamingResponse(
+        sse_generator(run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Clarification answer in streaming mode
+# POST /api/suggestions/runs/{run_id}/respond-stream
+# ---------------------------------------------------------------------------
+
+
+@router.post("/runs/{run_id}/respond-stream")
+def respond_stream(run_id: int, dto: RespondDtoIn) -> dict:
+    try:
+        deliver_answer(run_id, dto.answer)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail=f"No active streaming session for run {run_id}.")
+    return {"status": "accepted"}
 
 
 @router.post("/{suggestion_id}/feedback", status_code=201)

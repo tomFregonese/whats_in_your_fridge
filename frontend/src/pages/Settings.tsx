@@ -5,8 +5,8 @@ import { addAllergy, deleteAllergy, listAllergies } from "../api/allergies";
 import { setToken as saveToken } from "../api/auth";
 import type { PreferenceNote } from "../api/preferences";
 import { addPreference, deletePreference, listPreferences } from "../api/preferences";
-import type { SettingsOut } from "../api/settings";
-import { getSettings, updateSettings } from "../api/settings";
+import type { ConnectionTestResult, SettingsOut } from "../api/settings";
+import { getSettings, testConnection, updateSettings } from "../api/settings";
 import { ApiErrorMessage } from "../components/ApiErrorMessage";
 import { AppLayout } from "../components/AppLayout";
 import { ModelField } from "../components/ModelField";
@@ -148,6 +148,10 @@ export function Settings() {
           }
         />
         <ModelField selectedId={settings.openrouter_model_id} onSelect={handleSelectModel} />
+        <ConnectionTestIndicator
+          modelId={settings.openrouter_model_id}
+          tokenConfigured={settings.openrouter_token_configured}
+        />
       </div>
 
       <div className="card">
@@ -237,6 +241,76 @@ export function Settings() {
         </div>
       </div>
     </AppLayout>
+  );
+}
+
+function ConnectionTestIndicator({
+  modelId,
+  tokenConfigured,
+}: {
+  modelId: string | null;
+  tokenConfigured: boolean;
+}) {
+  const [status, setStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
+  const [detail, setDetail] = useState<string | null>(null);
+
+  // Reset to idle when the model or token changes
+  useEffect(() => {
+    setStatus("idle");
+    setDetail(null);
+  }, [modelId, tokenConfigured]);
+
+  async function handleTest(): Promise<void> {
+    if (!modelId || !tokenConfigured) return;
+    setStatus("testing");
+    setDetail(null);
+    try {
+      const result: ConnectionTestResult = await testConnection(modelId);
+      setStatus(result.ok ? "ok" : "fail");
+      setDetail(result.detail);
+    } catch {
+      setStatus("fail");
+      setDetail("Could not reach the server.");
+    }
+  }
+
+  const label = status === "idle" ? "Test connection" : "";
+  const dotClass =
+    status === "ok" ? "ok" : status === "fail" ? "fail" : status === "testing" ? "pending" : "";
+
+  return (
+    <div className="field-row">
+      <div className="field">
+        <span className="field-label">Connection</span>
+        {status === "idle" && <span className="empty">Not tested yet</span>}
+        {status === "ok" && (
+          <span className="connection-status">
+            <span className="connection-dot ok" />
+            Connected
+          </span>
+        )}
+        {status === "fail" && (
+          <span className="connection-status" title={detail ?? undefined}>
+            <span className="connection-dot fail" />
+            Failed{detail ? ` — ${detail}` : ""}
+          </span>
+        )}
+        {status === "testing" && (
+          <span className="connection-status">
+            <span className="connection-dot pending" />
+            Testing…
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm connection-test-btn"
+        disabled={status === "testing" || !modelId || !tokenConfigured}
+        onClick={() => void handleTest()}
+      >
+        {status === "testing" ? "Testing…" : "Test connection"}
+      </button>
+    </div>
   );
 }
 

@@ -39,3 +39,12 @@ export interface ModelStatus {
 export function getModelStatus(): Promise<ModelStatus> {
   return api.get<ModelStatus>("/api/settings/model-status");
 }
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  detail: string | null;
+}
+
+export function testConnection(modelId: string): Promise<ConnectionTestResult> {
+  return api.post<ConnectionTestResult>("/api/settings/test-connection", { model_id: modelId });
+}

@@ -24,3 +24,12 @@ class FreeModelDtoOut(BaseModel):
 class ModelStatusDtoOut(BaseModel):
     model_id: str | None
     available: bool
+
+
+class TestConnectionDtoIn(BaseModel):
+    model_id: str
+
+
+class TestConnectionDtoOut(BaseModel):
+    ok: bool
+    detail: str | None = None

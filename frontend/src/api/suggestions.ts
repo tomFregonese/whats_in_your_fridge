@@ -38,3 +38,19 @@ export function createSuggestions(payload: FridgeInputPayload): Promise<Suggesti
 export function respondToClarification(runId: number, answer: string): Promise<SuggestionsResult> {
   return api.post<SuggestionsResult>(`/api/suggestions/runs/${String(runId)}/respond`, { answer });
 }
+
+/* ------------------------------------------------------------------ */
+/* Streaming endpoint — returns the run_id to subscribe to SSE events  */
+/* ------------------------------------------------------------------ */
+
+export interface StreamStartResult {
+  run_id: number;
+}
+
+export function createSuggestionsStream(payload: FridgeInputPayload): Promise<StreamStartResult> {
+  return api.post<StreamStartResult>("/api/suggestions/stream", payload);
+}
+
+export function respondToClarificationStream(runId: number, answer: string): Promise<{ status: string }> {
+  return api.post<{ status: string }>(`/api/suggestions/runs/${String(runId)}/respond-stream`, { answer });
+}
