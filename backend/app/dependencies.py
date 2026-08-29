@@ -16,6 +16,7 @@ from app.persistence.repositories.allergy_repository import AllergyRepository
 from app.persistence.repositories.feedback_repository import FeedbackRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.fridge_stock_repository import FridgeStockRepository
+from app.persistence.repositories.merge_dismissal_repository import MergeDismissalRepository
 from app.persistence.repositories.preference_note_repository import PreferenceNoteRepository
 from app.persistence.repositories.settings_repository import SettingsRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
@@ -86,10 +87,17 @@ def get_fridge_stock_repository(
     return FridgeStockRepository(session)
 
 
+def get_merge_dismissal_repository(
+    session: Session = Depends(get_session),
+) -> MergeDismissalRepository:
+    return MergeDismissalRepository(session)
+
+
 def get_fridge_stock_service(
     repository: FridgeStockRepository = Depends(get_fridge_stock_repository),
+    dismissal_repository: MergeDismissalRepository = Depends(get_merge_dismissal_repository),
 ) -> FridgeStockService:
-    return FridgeStockService(repository)
+    return FridgeStockService(repository, dismissal_repository)
 
 
 def get_agent_run_repository(session: Session = Depends(get_session)) -> AgentRunRepository:

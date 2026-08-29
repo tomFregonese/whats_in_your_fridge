@@ -7,9 +7,12 @@ itself — see `docker-compose.yml`).
 Kept separate from `agent/client.py` on purpose: that module talks to
 OpenRouter specifically (auth token, `:free` catalog, the whole
 `OpenRouterError` hierarchy); this one talks to a local, unauthenticated,
-always-free service that only ever does one thing — structure a dictated
-transcript into ingredient/quantity rows. Same shape as `stt_client.py`
-for the same reason.
+always-free service. Same shape as `stt_client.py` for the same reason.
+
+Two capabilities, same service: `structure()` (dictation transcript ->
+structured ingredient/quantity rows) and `find_duplicates()` (fridge-
+stock names that look like the same real ingredient — see
+`agent/duplicate_check.py`, the only caller of the latter).
 """
 
 import httpx
@@ -25,6 +28,23 @@ def structure(*, transcript: str) -> dict[str, object]:
         response = httpx.post(
             f"{settings.nlp_url}/structure",
             json={"transcript": transcript},
+            timeout=_REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise NlpUnavailableError(
+            "Could not reach the local structuring service — check that the `nlp` "
+            "container is running."
+        ) from exc
+
+    return dict(response.json())
+
+
+def find_duplicates(*, ingredient_names: list[str]) -> dict[str, object]:
+    try:
+        response = httpx.post(
+            f"{settings.nlp_url}/find-duplicates",
+            json={"ingredient_names": ingredient_names},
             timeout=_REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()

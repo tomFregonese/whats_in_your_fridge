@@ -1,9 +1,12 @@
-"""Local NLP structuring service for voice dictation — turns a dictated
-grocery-list transcript into structured ingredient+quantity rows using a
-small, grammar-constrained local chat model, running as its own Docker
-Compose service (see `docker-compose.yml`'s `nlp` service), reachable
-only from `api` over Docker's internal network, never exposed to the
-host.
+"""Local NLP service for voice dictation and fridge-stock consistency —
+turns a dictated grocery-list transcript into structured
+ingredient+quantity rows (`/structure`), and groups the household's
+current fridge-stock names that look like the same real ingredient
+(translation, typo, singular/plural — `/find-duplicates`) — using the
+same small, grammar-constrained local chat model for both, running as
+its own Docker Compose service (see `docker-compose.yml`'s `nlp`
+service), reachable only from `api` over Docker's internal network,
+never exposed to the host.
 
 Deliberately outside the backend's own layered architecture, same
 reasoning as `stt/main.py` — a single-purpose, stateless inference shim
@@ -148,6 +151,78 @@ def structure(request: StructureRequest) -> StructureResponse:
         # realistic way to still land here is hitting `max_tokens` before
         # the JSON closes. The caller (`agent/nlp_client.py`) treats any
         # non-2xx response the same as "service unreachable".
+        raise HTTPException(
+            status_code=500, detail=f"Local model produced invalid JSON: {exc}"
+        ) from exc
+
+
+# A fridge list is short (a household's actual stock, not a warehouse) —
+# generous headroom for a response that can echo several grouped names.
+MAX_DUPLICATES_OUTPUT_TOKENS = 512
+
+
+class FindDuplicatesRequest(BaseModel):
+    ingredient_names: list[str] = Field(min_length=2)
+
+
+class DuplicateGroup(BaseModel):
+    # Deliberately no `min_length` here: JSON-schema array-length
+    # constraints (`minItems`) aren't translated into the GBNF grammar
+    # `response_format` builds (llama.cpp's schema-to-grammar conversion
+    # covers `type`/`properties`/`required`/`enum`, not array-length
+    # bounds) — observed the model return a "group" naming only one
+    # ingredient despite this. Enforcing `min_length` here would make
+    # that one bad group fail validation for the *entire* response
+    # instead of just being a no-op group; the caller
+    # (`FridgeStockService.find_merge_suggestions`) already produces zero
+    # merge pairs from a group with fewer than 2 resolvable names, so
+    # there's nothing to gain from rejecting it here too.
+    names: list[str] = Field(default_factory=list)
+    suggested_name: str
+
+
+class FindDuplicatesResponse(BaseModel):
+    groups: list[DuplicateGroup] = Field(default_factory=list)
+
+
+_DUPLICATES_RESPONSE_SCHEMA = FindDuplicatesResponse.model_json_schema()
+
+_DUPLICATES_SYSTEM_PROMPT = (
+    "You are given a household's fridge inventory as a JSON list of ingredient names, in "
+    "French, English, or a mix, possibly with typos. Some entries may name the exact same "
+    "real ingredient — because they're the same word in a different language, a typo of "
+    "each other, or singular vs plural of the same word. Group ONLY entries that are truly "
+    "the same real ingredient. Do NOT group different-but-related ingredients (e.g. "
+    '"pommes" and "pommes de terre" are NOT the same — apples vs potatoes; "oignon" and '
+    '"oignon vert" are NOT the same). When unsure, leave items ungrouped. Every name in '
+    "every group MUST be copied EXACTLY, character for character, from the input — never "
+    'rephrase or correct it. "suggested_name" must be exactly one of that group\'s names. '
+    "Ingredients with no duplicate get no group.\n"
+    'Example input: ["carottes", "lait", "carrots", "pommes", "pommes de terre"]\n'
+    'Example output: {"groups": [{"names": ["carottes", "carrots"], "suggested_name": '
+    '"carottes"}]}\n'
+    "Respond with JSON only."
+)
+
+
+@app.post("/find-duplicates")
+def find_duplicates(request: FindDuplicatesRequest) -> FindDuplicatesResponse:
+    model = _get_model()
+    with _inference_lock:
+        completion = model.create_chat_completion(
+            messages=[
+                {"role": "system", "content": _DUPLICATES_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(request.ingredient_names)},
+            ],
+            response_format={"type": "json_object", "schema": _DUPLICATES_RESPONSE_SCHEMA},
+            temperature=0.0,
+            max_tokens=MAX_DUPLICATES_OUTPUT_TOKENS,
+        )
+    content = completion["choices"][0]["message"]["content"]
+
+    try:
+        return FindDuplicatesResponse.model_validate(json.loads(content))
+    except (json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(
             status_code=500, detail=f"Local model produced invalid JSON: {exc}"
         ) from exc

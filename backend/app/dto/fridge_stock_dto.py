@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.domain.fridge_stock import FridgeStockItem
+from app.domain.merge_suggestion import MergeSuggestion
 
 
 class FridgeStockItemDtoIn(BaseModel):
@@ -69,3 +70,49 @@ class FridgeStockBulkAddDtoIn(BaseModel):
     (updates a same-name existing row instead of duplicating it)."""
 
     items: list[FridgeStockItemDtoIn] = Field(min_length=1)
+
+
+class MergeSuggestionDtoOut(BaseModel):
+    """Body of one entry in `GET /api/fridge-stock/merge-suggestions` — two
+    existing stock rows the local model judged to name the same real
+    ingredient (see `agent/duplicate_check.py`), plus the name it'd
+    suggest keeping."""
+
+    item_a: FridgeStockItemDtoOut
+    item_b: FridgeStockItemDtoOut
+    suggested_name: str
+
+    @classmethod
+    def from_domain(cls, suggestion: MergeSuggestion) -> MergeSuggestionDtoOut:
+        return cls(
+            item_a=FridgeStockItemDtoOut.from_domain(suggestion.item_a),
+            item_b=FridgeStockItemDtoOut.from_domain(suggestion.item_b),
+            suggested_name=suggestion.suggested_name,
+        )
+
+
+class FridgeStockMergeDtoIn(BaseModel):
+    """Body of `POST /api/fridge-stock/merge` — the user's one-click
+    confirmation of a `MergeSuggestionDtoOut`. `merged_name` is passed
+    explicitly (rather than re-derived server-side) since the frontend
+    already has the model's `suggested_name` and there's no second
+    "pick a name" step."""
+
+    keep_item_id: int
+    remove_item_id: int
+    merged_name: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _ids_must_differ(self) -> FridgeStockMergeDtoIn:
+        if self.keep_item_id == self.remove_item_id:
+            raise ValueError("keep_item_id and remove_item_id must be different.")
+        return self
+
+
+class MergeDismissalDtoIn(BaseModel):
+    """Body of `POST /api/fridge-stock/merge-suggestions/dismiss` — a
+    name pair the user says are NOT the same ingredient, so it's never
+    suggested again (see `MergeDismissalRepository`)."""
+
+    name_a: str = Field(min_length=1)
+    name_b: str = Field(min_length=1)

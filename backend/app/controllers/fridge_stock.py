@@ -10,6 +10,9 @@ from app.dto.fridge_stock_dto import (
     FridgeStockBulkAddDtoIn,
     FridgeStockItemDtoIn,
     FridgeStockItemDtoOut,
+    FridgeStockMergeDtoIn,
+    MergeDismissalDtoIn,
+    MergeSuggestionDtoOut,
 )
 from app.services.fridge_stock_service import FridgeStockService
 
@@ -97,3 +100,36 @@ def stream_dictation(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/merge-suggestions")
+def list_merge_suggestions(
+    service: FridgeStockService = Depends(get_fridge_stock_service),
+) -> list[MergeSuggestionDtoOut]:
+    """Fridge-stock names the local model thinks name the same real
+    ingredient (translation, typo, singular/plural — see
+    `agent/duplicate_check.py`), minus anything already dismissed.
+    Recomputed on every call — nothing here is persisted. The frontend
+    calls this on its own schedule (page load, after any mutation); it's
+    never part of the plain `GET ""` list."""
+    return [MergeSuggestionDtoOut.from_domain(s) for s in service.find_merge_suggestions()]
+
+
+@router.post("/merge")
+def merge_fridge_stock_items(
+    dto: FridgeStockMergeDtoIn,
+    service: FridgeStockService = Depends(get_fridge_stock_service),
+) -> FridgeStockItemDtoOut:
+    return FridgeStockItemDtoOut.from_domain(
+        service.merge_items(
+            keep_id=dto.keep_item_id, remove_id=dto.remove_item_id, merged_name=dto.merged_name
+        )
+    )
+
+
+@router.post("/merge-suggestions/dismiss", status_code=204)
+def dismiss_merge_suggestion(
+    dto: MergeDismissalDtoIn,
+    service: FridgeStockService = Depends(get_fridge_stock_service),
+) -> None:
+    service.dismiss_merge_suggestion(dto.name_a, dto.name_b)

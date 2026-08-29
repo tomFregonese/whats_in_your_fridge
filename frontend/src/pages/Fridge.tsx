@@ -1,15 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import type { FridgeStockItem } from "../api/fridgeStock";
+import type { FridgeStockItem, MergeSuggestion } from "../api/fridgeStock";
 import {
   addFridgeStockItem,
   deleteFridgeStockItem,
+  dismissMergeSuggestion,
   listFridgeStockItems,
+  listMergeSuggestions,
+  mergeFridgeStockItems,
   updateFridgeStockItem,
 } from "../api/fridgeStock";
 import { ApiErrorMessage } from "../components/ApiErrorMessage";
 import { AppLayout } from "../components/AppLayout";
 import { VoiceDictation } from "../components/VoiceDictation";
+
+// How long to wait after the ingredient list settles before rechecking
+// for duplicates — collapses a burst of quick edits (e.g. dictating
+// several items in a row) into one check instead of one per mutation.
+const DUPLICATE_CHECK_DEBOUNCE_MS = 400;
 
 /** Routed at `/fridge` — the persistent ingredient inventory (unlike
  * `FridgeInputForm`'s per-generation, throwaway entry). What's added or
@@ -19,12 +27,99 @@ import { VoiceDictation } from "../components/VoiceDictation";
 export function Fridge() {
   const [items, setItems] = useState<FridgeStockItem[] | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([]);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [busyItemIds, setBusyItemIds] = useState<Set<number>>(new Set());
+  // Discards a duplicate-check result that's no longer the latest one in
+  // flight — same "stale async result" guard shape as `VoiceDictation.tsx`'s
+  // `sessionIdRef`, needed here because the list can change again (another
+  // edit, another dictation) before a slower check from before it resolves.
+  const duplicateCheckGenerationRef = useRef(0);
 
   useEffect(() => {
     void listFridgeStockItems()
       .then(setItems)
       .catch((err: unknown) => setError(err));
   }, []);
+
+  // Rechecks for duplicates on the initial load (satisfies "every time the
+  // app opens") and after every settled mutation (add/save/delete/dictate/
+  // merge/dismiss all change `items`; in-progress edit keystrokes live in
+  // `FridgeItemRow`'s own local state and never touch it, so they don't
+  // spuriously retrigger this). Silent on failure by design — the
+  // household's own fridge list must never show an error just because the
+  // local model is briefly slow or the `nlp` container is down.
+  useEffect(() => {
+    if (items === null || items.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    const generation = ++duplicateCheckGenerationRef.current;
+    const timer = window.setTimeout(() => {
+      setCheckingDuplicates(true);
+      listMergeSuggestions()
+        .then((result) => {
+          if (duplicateCheckGenerationRef.current === generation) setSuggestions(result);
+        })
+        .catch(() => {
+          if (duplicateCheckGenerationRef.current === generation) setSuggestions([]);
+        })
+        .finally(() => {
+          if (duplicateCheckGenerationRef.current === generation) setCheckingDuplicates(false);
+        });
+    }, DUPLICATE_CHECK_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [items]);
+
+  function markBusy(ids: number[]): void {
+    setBusyItemIds((prev) => new Set([...prev, ...ids]));
+  }
+
+  function clearBusy(ids: number[]): void {
+    setBusyItemIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+  }
+
+  async function handleMergeSuggestion(suggestion: MergeSuggestion): Promise<void> {
+    const { item_a, item_b, suggested_name } = suggestion;
+    markBusy([item_a.id, item_b.id]);
+    try {
+      const merged = await mergeFridgeStockItems(item_a.id, item_b.id, suggested_name);
+      setItems((prev) =>
+        (prev ?? [])
+          .filter((item) => item.id !== item_b.id)
+          .map((item) => (item.id === merged.id ? merged : item))
+          .sort((a, b) => a.ingredient_name.localeCompare(b.ingredient_name)),
+      );
+      // Cosmetic only — the `items` change above re-triggers the debounced
+      // recheck effect a moment later, which is the source of truth.
+      setSuggestions((prev) => prev.filter((s) => s !== suggestion));
+    } catch (err) {
+      setError(err);
+      // A concurrent action (e.g. an overlapping merge on one of these two
+      // items) most likely changed something here — reconcile with the
+      // server rather than guess.
+      void listFridgeStockItems().then(setItems);
+    } finally {
+      clearBusy([item_a.id, item_b.id]);
+    }
+  }
+
+  async function handleDismissSuggestion(suggestion: MergeSuggestion): Promise<void> {
+    const { item_a, item_b } = suggestion;
+    markBusy([item_a.id, item_b.id]);
+    try {
+      await dismissMergeSuggestion(item_a.ingredient_name, item_b.ingredient_name);
+      setSuggestions((prev) => prev.filter((s) => s !== suggestion));
+    } catch (err) {
+      setError(err);
+    } finally {
+      clearBusy([item_a.id, item_b.id]);
+    }
+  }
 
   async function handleAdd(name: string, quantity: string): Promise<void> {
     setError(null);
@@ -94,6 +189,58 @@ export function Fridge() {
           }}
         />
       </div>
+
+      {suggestions.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <h2>Possible duplicates</h2>
+            {checkingDuplicates && (
+              <span className="connection-status">
+                <span className="connection-dot pending" />
+                Checking…
+              </span>
+            )}
+          </div>
+          <ul className="merge-suggestion-list">
+            {suggestions.map((suggestion) => {
+              const busy =
+                busyItemIds.has(suggestion.item_a.id) || busyItemIds.has(suggestion.item_b.id);
+              return (
+                <li
+                  key={`${String(suggestion.item_a.id)}-${String(suggestion.item_b.id)}`}
+                  className="merge-suggestion-row"
+                >
+                  <span className="merge-suggestion-names">
+                    <span>{suggestion.item_a.ingredient_name}</span>
+                    <span className="merge-suggestion-connector" aria-hidden="true">
+                      ↔
+                    </span>
+                    <span>{suggestion.item_b.ingredient_name}</span>
+                  </span>
+                  <span className="merge-suggestion-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={busy}
+                      onClick={() => void handleMergeSuggestion(suggestion)}
+                    >
+                      {busy ? "Working…" : `Merge as "${suggestion.suggested_name}"?`}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy}
+                      onClick={() => void handleDismissSuggestion(suggestion)}
+                    >
+                      Dismiss
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <div className="card">
         <div className="card-header">

@@ -141,3 +141,40 @@ export function bulkUpsertFridgeStockItems(
 ): Promise<FridgeStockItem[]> {
   return api.post<FridgeStockItem[]>("/api/fridge-stock/bulk", { items });
 }
+
+/** Two existing stock rows the local model judged to name the same real
+ * ingredient (translation, typo, singular/plural — see
+ * `agent/duplicate_check.py`), plus the name it'd suggest keeping. */
+export interface MergeSuggestion {
+  item_a: FridgeStockItem;
+  item_b: FridgeStockItem;
+  suggested_name: string;
+}
+
+/** Recomputed on every call — nothing about a suggestion is persisted
+ * (only a *dismissal* is). Never part of `listFridgeStockItems()`; the
+ * caller (`Fridge.tsx`) fetches this separately, on its own schedule. */
+export function listMergeSuggestions(): Promise<MergeSuggestion[]> {
+  return api.get<MergeSuggestion[]>("/api/fridge-stock/merge-suggestions");
+}
+
+export function mergeFridgeStockItems(
+  keepItemId: number,
+  removeItemId: number,
+  mergedName: string,
+): Promise<FridgeStockItem> {
+  return api.post<FridgeStockItem>("/api/fridge-stock/merge", {
+    keep_item_id: keepItemId,
+    remove_item_id: removeItemId,
+    merged_name: mergedName,
+  });
+}
+
+/** Marks a name pair as "not the same ingredient" so it's never
+ * suggested again. */
+export function dismissMergeSuggestion(nameA: string, nameB: string): Promise<void> {
+  return api.post<void>("/api/fridge-stock/merge-suggestions/dismiss", {
+    name_a: nameA,
+    name_b: nameB,
+  });
+}

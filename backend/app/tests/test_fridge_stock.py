@@ -5,6 +5,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from app.agent.duplicate_check import DuplicateGroupArgs
 from app.agent.output_schema import DictatedItemArgs
 from app.services.exceptions import NlpUnavailableError, SttUnavailableError
 
@@ -216,3 +217,162 @@ def test_bulk_add_updates_existing_item_by_name_and_adds_new_ones(client: TestCl
     assert carrot["id"] == existing["id"]
     assert carrot["quantity_raw"] == "5"
     assert any(i["ingredient_name"] == "milk" for i in remaining)
+
+
+def _add(client: TestClient, name: str, **kwargs: object) -> dict[str, Any]:
+    body: dict[str, object] = {"ingredient_name": name, **kwargs}
+    response = client.post("/api/fridge-stock", json=body)
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_merge_suggestions_returns_a_suggestion_for_two_seeded_items(client: TestClient) -> None:
+    carottes = _add(client, "carottes", quantity_value=3, quantity_unit="pcs")
+    carrots = _add(client, "carrots", quantity_value=2, quantity_unit="pcs")
+
+    groups = [DuplicateGroupArgs(names=["carottes", "carrots"], suggested_name="carottes")]
+    with patch(
+        "app.services.fridge_stock_service.duplicate_check.find_duplicate_groups",
+        return_value=groups,
+    ):
+        response = client.get("/api/fridge-stock/merge-suggestions")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    ids = {body[0]["item_a"]["id"], body[0]["item_b"]["id"]}
+    assert ids == {carottes["id"], carrots["id"]}
+    assert body[0]["suggested_name"] == "carottes"
+
+
+def test_merge_suggestions_drops_a_one_name_group(client: TestClient) -> None:
+    # Regression test: a "group" naming only one ingredient (a real
+    # possibility — see test_duplicate_check.py) must not produce a
+    # bogus self-merge suggestion or crash.
+    _add(client, "pommes de terre")
+    _add(client, "carottes")
+    _add(client, "carrots")
+
+    groups = [
+        DuplicateGroupArgs(names=["pommes de terre"], suggested_name="pommes de terre"),
+        DuplicateGroupArgs(names=["carottes", "carrots"], suggested_name="carottes"),
+    ]
+    with patch(
+        "app.services.fridge_stock_service.duplicate_check.find_duplicate_groups",
+        return_value=groups,
+    ):
+        response = client.get("/api/fridge-stock/merge-suggestions")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert {body[0]["item_a"]["ingredient_name"], body[0]["item_b"]["ingredient_name"]} == {
+        "carottes",
+        "carrots",
+    }
+
+
+def test_merge_suggestions_drops_a_group_with_an_unresolvable_name(client: TestClient) -> None:
+    _add(client, "carottes")
+    _add(client, "lait")
+
+    # "carrots" was never a real item — a hallucinated/rephrased name.
+    groups = [DuplicateGroupArgs(names=["carottes", "carrots"], suggested_name="carottes")]
+    with patch(
+        "app.services.fridge_stock_service.duplicate_check.find_duplicate_groups",
+        return_value=groups,
+    ):
+        response = client.get("/api/fridge-stock/merge-suggestions")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_merge_suggestions_excludes_a_dismissed_pair(client: TestClient) -> None:
+    _add(client, "carottes")
+    _add(client, "carrots")
+
+    groups = [DuplicateGroupArgs(names=["carottes", "carrots"], suggested_name="carottes")]
+    with patch(
+        "app.services.fridge_stock_service.duplicate_check.find_duplicate_groups",
+        return_value=groups,
+    ):
+        dismissed = client.post(
+            "/api/fridge-stock/merge-suggestions/dismiss",
+            json={"name_a": "carottes", "name_b": "carrots"},
+        )
+        assert dismissed.status_code == 204
+
+        response = client.get("/api/fridge-stock/merge-suggestions")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_merge_sums_quantity_when_units_match(client: TestClient) -> None:
+    keep = _add(client, "carottes", quantity_value=3, quantity_unit="pcs")
+    remove = _add(client, "carrots", quantity_value=2, quantity_unit="pcs")
+
+    response = client.post(
+        "/api/fridge-stock/merge",
+        json={
+            "keep_item_id": keep["id"],
+            "remove_item_id": remove["id"],
+            "merged_name": "carottes",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == keep["id"]
+    assert body["ingredient_name"] == "carottes"
+    assert body["quantity_value"] == 5
+    assert body["quantity_unit"] == "pcs"
+
+    remaining = client.get("/api/fridge-stock").json()
+    assert [i["id"] for i in remaining] == [keep["id"]]
+
+
+def test_merge_keeps_target_quantity_when_units_differ(client: TestClient) -> None:
+    keep = _add(client, "carottes", quantity_value=2, quantity_unit="kg")
+    remove = _add(client, "carrots", quantity_value=3, quantity_unit="pcs")
+
+    response = client.post(
+        "/api/fridge-stock/merge",
+        json={
+            "keep_item_id": keep["id"],
+            "remove_item_id": remove["id"],
+            "merged_name": "carottes",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["quantity_value"] == 2
+    assert body["quantity_unit"] == "kg"
+
+
+def test_merge_with_unknown_id_returns_404(client: TestClient) -> None:
+    keep = _add(client, "carottes")
+
+    response = client.post(
+        "/api/fridge-stock/merge",
+        json={"keep_item_id": keep["id"], "remove_item_id": 999, "merged_name": "carottes"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_merge_with_equal_ids_returns_422(client: TestClient) -> None:
+    keep = _add(client, "carottes")
+
+    response = client.post(
+        "/api/fridge-stock/merge",
+        json={
+            "keep_item_id": keep["id"],
+            "remove_item_id": keep["id"],
+            "merged_name": "carottes",
+        },
+    )
+
+    assert response.status_code == 422
