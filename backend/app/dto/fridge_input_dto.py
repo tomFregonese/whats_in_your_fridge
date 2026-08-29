@@ -13,6 +13,7 @@ class FridgeInputItemDtoIn(BaseModel):
     quantity_value: float | None = None
     quantity_unit: str | None = None
     quantity_raw: str | None = None
+    fridge_stock_item_id: int | None = None
 
 
 class FridgeInputDtoIn(BaseModel):
@@ -45,6 +46,7 @@ class FridgeInputDtoIn(BaseModel):
                     quantity_value=item.quantity_value,
                     quantity_unit=item.quantity_unit,
                     quantity_raw=item.quantity_raw,
+                    fridge_stock_item_id=item.fridge_stock_item_id,
                 )
                 for item in self.items
             ],

@@ -28,6 +28,7 @@ changing this loop's shape).
 
 import json
 from collections.abc import Callable
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,7 +39,7 @@ from openai.types.chat import (
 )
 from pydantic import ValidationError
 
-from app.agent import allergy_check, client
+from app.agent import allergy_check, client, stock_reference_check
 from app.agent.output_schema import (
     DemanderPrecisionArgs,
     PlatArgs,
@@ -95,10 +96,14 @@ def run(
     messages: list[ChatCompletionMessageParam],
     allergies: list[Allergy],
     selected_dish_names: list[str],
+    known_stock_item_ids: AbstractSet[int] = frozenset(),
 ) -> LoopResult:
     """`RECIPES` phase: generates the full recipe for exactly
     `selected_dish_names` (the ideas the user picked out of what
-    `run_ideas()` proposed)."""
+    `run_ideas()` proposed). `known_stock_item_ids` are the persistent
+    fridge stock item IDs offered to the model in this run's prompt (see
+    `agent/prompts.py::_format_item`) — used to sanitize which IDs a dish
+    is allowed to claim it used (see `agent/stock_reference_check.py`)."""
     tools = build_tools(AgentRunPhase.RECIPES)
     working_messages = list(messages)
 
@@ -154,6 +159,7 @@ def run(
             status = AllergyCheckStatus.OK if attempt == 0 else AllergyCheckStatus.REGENERATED
 
             safe_plats, violations = allergy_check.check_all(plats_args.plats, allergies)
+            stock_reference_check.sanitize_stock_ids(safe_plats, known_stock_item_ids)
 
             if violations:
                 if last_attempt:
@@ -279,9 +285,11 @@ def stream_run(
     allergies: list[Allergy],
     selected_dish_names: list[str],
     reasoning_callback: Callable[[str], None],
+    known_stock_item_ids: AbstractSet[int] = frozenset(),
 ) -> LoopResult:
     """Same `RECIPES`-phase loop as `run()`, but streams reasoning tokens
-    via `reasoning_callback` during each model call.
+    via `reasoning_callback` during each model call. See `run()`'s
+    docstring for `known_stock_item_ids`.
     """
     tools = build_tools(AgentRunPhase.RECIPES)
     working_messages = list(messages)
@@ -338,6 +346,7 @@ def stream_run(
             status = AllergyCheckStatus.OK if attempt == 0 else AllergyCheckStatus.REGENERATED
 
             safe_plats, violations = allergy_check.check_all(plats_args.plats, allergies)
+            stock_reference_check.sanitize_stock_ids(safe_plats, known_stock_item_ids)
 
             if violations:
                 if last_attempt:

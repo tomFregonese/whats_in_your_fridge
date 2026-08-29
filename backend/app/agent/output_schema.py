@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.domain.dish_idea import DishIdea
 from app.domain.suggestion import AllergyCheckStatus, Suggestion
@@ -35,6 +35,13 @@ class PlatArgs(BaseModel):
     portions: int = Field(gt=0)
     ingredients: list[PlatIngredient] = Field(min_length=1)
     etapes: list[str] = Field(min_length=1)
+    ingredients_stock_ids: list[int] = Field(
+        default_factory=list,
+        description=(
+            "IDs (from the `[stock#ID]` tags in the fridge contents) of the persistent "
+            "fridge stock items this dish actually used."
+        ),
+    )
 
     def to_domain(
         self, *, allergy_check_status: AllergyCheckStatus = AllergyCheckStatus.OK
@@ -44,7 +51,10 @@ class PlatArgs(BaseModel):
         agent doesn't invent its own shape for this. `allergy_check_status`
         defaults to `OK`; `agent/loop.py` passes the real, deterministically
         checked status (see `agent/allergy_check.py`) once a dish survives
-        (or is corrected past) that check.
+        (or is corrected past) that check. `ingredients_stock_ids` is
+        expected to have already been sanitized against the known stock ids
+        for this run (see `agent/stock_reference_check.py`) by the time this
+        runs, so it's trusted as-is here.
         """
         ingredient_strings = [
             f"{i.nom} ({i.quantite})" if i.quantite else i.nom for i in self.ingredients
@@ -58,6 +68,7 @@ class PlatArgs(BaseModel):
             steps_json=json.dumps(self.etapes),
             servings=self.portions,
             allergy_check_status=allergy_check_status,
+            used_stock_item_ids_json=json.dumps(self.ingredients_stock_ids),
         )
 
 
@@ -87,3 +98,39 @@ class ProposerIdeesArgs(BaseModel):
 
     idees: list[IdeeArgs] = Field(min_length=1)
     notes_generales: str | None = None
+
+
+class DictatedItemArgs(BaseModel):
+    """One grocery item split out of a dictated transcript (see
+    `agent/dictation.py`) — a different shape than `FridgeInputItemDtoIn`
+    on purpose: `quantity_raw` here always holds the model's own phrasing
+    of the amount (e.g. "a couple", "about half a liter"), not a value the
+    caller supplied."""
+
+    ingredient_name: str = Field(min_length=1)
+    quantity_value: float | None = None
+    quantity_unit: str | None = None
+    quantity_raw: str | None = None
+
+    @field_validator("quantity_unit", "quantity_raw", mode="before")
+    @classmethod
+    def _blank_or_stringly_null_becomes_none(cls, value: object) -> object:
+        """A small model under grammar-constrained JSON decoding
+        occasionally emits the literal string `"null"` (or an empty
+        string) for one of these fields instead of the actual JSON
+        `null` — the shape is still schema-valid (it's a string, as
+        allowed), so nothing upstream catches it. Without this, that
+        string would be stored and displayed as if it were real data
+        (e.g. a `quantity_unit` of `"null"`)."""
+        if isinstance(value, str) and value.strip().lower() in ("", "null", "none"):
+            return None
+        return value
+
+
+class EnregistrerIngredientsArgs(BaseModel):
+    """Arguments for the `enregistrer_ingredients` tool — the one-shot
+    "final answer" contract for parsing a dictated fridge update. No
+    `demander_precision` companion here: dictation is a single, best-effort
+    pass, not a multi-turn conversation (see `agent/dictation.py`)."""
+
+    items: list[DictatedItemArgs] = Field(default_factory=list)

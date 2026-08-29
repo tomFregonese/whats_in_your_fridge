@@ -45,6 +45,9 @@ class FridgeInputItemEntity(SQLModel, table=True):
     quantity_value: float | None = None
     quantity_unit: str | None = None
     quantity_raw: str | None = None
+    fridge_stock_item_id: int | None = Field(
+        default=None, foreign_key="fridge_stock_item.id", index=True
+    )
 
     def to_domain(self) -> FridgeInputItem:
         return FridgeInputItem(
@@ -54,6 +57,7 @@ class FridgeInputItemEntity(SQLModel, table=True):
             quantity_value=self.quantity_value,
             quantity_unit=self.quantity_unit,
             quantity_raw=self.quantity_raw,
+            fridge_stock_item_id=self.fridge_stock_item_id,
         )
 
     @classmethod
@@ -67,4 +71,5 @@ class FridgeInputItemEntity(SQLModel, table=True):
             quantity_value=item.quantity_value,
             quantity_unit=item.quantity_unit,
             quantity_raw=item.quantity_raw,
+            fridge_stock_item_id=item.fridge_stock_item_id,
         )

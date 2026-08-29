@@ -11,6 +11,7 @@ from app.dependencies import (
     get_dedup_provider,
     get_feedback_service,
     get_fridge_input_repository,
+    get_fridge_stock_service,
     get_security_service,
     get_settings_service,
     get_suggestion_repository,
@@ -20,6 +21,7 @@ from app.domain.agent_run import AgentRunPhase
 from app.dto.dish_idea_dto import DishIdeaDtoOut
 from app.dto.feedback_dto import FeedbackDtoIn, FeedbackDtoOut
 from app.dto.fridge_input_dto import FridgeInputDtoIn
+from app.dto.fridge_stock_dto import FridgeStockItemDtoOut
 from app.dto.suggestion_dto import (
     RespondDtoIn,
     SelectDtoIn,
@@ -33,6 +35,7 @@ from app.persistence.repositories.suggestion_repository import SuggestionReposit
 from app.security.service import SecurityService
 from app.services.exceptions import ModelNotConfiguredError, NotFoundError
 from app.services.feedback_service import FeedbackService
+from app.services.fridge_stock_service import FridgeStockService
 from app.services.settings_service import SettingsService
 from app.services.suggestion_service import (
     ClarificationOutcome,
@@ -70,6 +73,9 @@ def _to_dto(fridge_input_id: int, outcome: SuggestionOutcome) -> SuggestionsResu
         meal_plan_id=outcome.meal_plan_id,
         suggestions=[SuggestionDtoOut.from_domain(s) for s in outcome.suggestions],
         notes_generales=outcome.notes_generales,
+        removed_stock_items=[
+            FridgeStockItemDtoOut.from_domain(item) for item in outcome.removed_stock_items
+        ],
     )
 
 
@@ -121,6 +127,7 @@ def create_suggestions_stream(
     settings_service: SettingsService = Depends(get_settings_service),
     security_service: SecurityService = Depends(get_security_service),
     dedup_provider: DedupProvider = Depends(get_dedup_provider),
+    fridge_stock_service: FridgeStockService = Depends(get_fridge_stock_service),
 ) -> dict[str, int]:
     fridge_input = dto.to_domain()
     saved_input = fridge_input_repository.add(fridge_input)
@@ -162,6 +169,7 @@ def create_suggestions_stream(
         settings_service=settings_service,
         security_service=security_service,
         dedup_provider=dedup_provider,
+        fridge_stock_service=fridge_stock_service,
     )
 
     return {"run_id": run_id}

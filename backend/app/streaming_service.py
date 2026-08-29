@@ -38,12 +38,14 @@ from app.domain.agent_run import AgentRun, AgentRunPhase, AgentRunStatus
 from app.domain.allergy import Allergy
 from app.domain.dish_idea import DishIdea
 from app.domain.fridge_input import FridgeInput
+from app.domain.fridge_stock import FridgeStockItem
 from app.domain.suggestion import MealPlan
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
 from app.services.exceptions import NotFoundError
+from app.services.fridge_stock_service import FridgeStockService
 from app.services.settings_service import SettingsService
 
 # Per-run in-memory state — keyed by the streaming run id.
@@ -80,6 +82,20 @@ def _encode_ideas_json(ideas: list[DishIdea]) -> str:
     return json.dumps([{"dish_name": i.dish_name, "description": i.description} for i in ideas])
 
 
+def _stock_item_to_dict(item: FridgeStockItem) -> dict[str, object]:
+    """Shapes a removed `FridgeStockItem` for the `"completed"` SSE event —
+    kept a plain dict (like every other event payload here) rather than a
+    Dto import, matching this module's existing style; mirrors
+    `FridgeStockItemDtoOut`'s fields on the non-streaming response."""
+    return {
+        "id": item.id,
+        "ingredient_name": item.ingredient_name,
+        "quantity_value": item.quantity_value,
+        "quantity_unit": item.quantity_unit,
+        "quantity_raw": item.quantity_raw,
+    }
+
+
 def _stream_run_ideas(
     *, run_id: int, token: str, model: str, messages: list[ChatCompletionMessageParam]
 ) -> IdeasLoopResult:
@@ -99,6 +115,7 @@ def _stream_run_recipes(
     messages: list[ChatCompletionMessageParam],
     allergies: list[Allergy],
     selected_dish_names: list[str],
+    known_stock_item_ids: set[int],
 ) -> LoopResult:
     return loop.stream_run(
         token=token,
@@ -106,6 +123,7 @@ def _stream_run_recipes(
         messages=messages,
         allergies=allergies,
         selected_dish_names=selected_dish_names,
+        known_stock_item_ids=known_stock_item_ids,
         reasoning_callback=lambda text: _event(run_id, {"type": "reasoning", "content": text}),
     )
 
@@ -124,6 +142,7 @@ def start_background(
     settings_service: SettingsService,
     security_service: SecurityService,
     dedup_provider: DedupProvider,
+    fridge_stock_service: FridgeStockService,
 ) -> None:
     """Start a background thread running the two-phase agent loop with
     streaming. `messages` is the `IDEAS`-phase system+user prompt.
@@ -147,6 +166,11 @@ def start_background(
         run_db_id: int | None = None
         selected_dish_names: list[str] = []
         ideas_so_far: list[DishIdea] = []
+        known_stock_item_ids = {
+            item.fridge_stock_item_id
+            for item in fridge_input.items
+            if item.fridge_stock_item_id is not None
+        }
 
         try:
             while True:
@@ -163,6 +187,7 @@ def start_background(
                         messages=current_messages,
                         allergies=allergies,
                         selected_dish_names=selected_dish_names,
+                        known_stock_item_ids=known_stock_item_ids,
                     )
 
                 if isinstance(phase_result, loop.ClarificationNeeded):
@@ -278,12 +303,27 @@ def start_background(
                         suggestions=phase_result.suggestions,
                     )
                 )
+
+                used_stock_ids = sorted(
+                    {
+                        stock_id
+                        for suggestion in saved_meal_plan.suggestions
+                        for stock_id in json.loads(suggestion.used_stock_item_ids_json)
+                    }
+                )
+                removed_items = (
+                    fridge_stock_service.deduct(used_stock_ids) if used_stock_ids else []
+                )
+
                 _event(
                     run_id,
                     {
                         "type": "completed",
                         "meal_plan_id": saved_meal_plan.id,
                         "notes_generales": phase_result.notes_generales,
+                        "removed_stock_items": [
+                            _stock_item_to_dict(item) for item in removed_items
+                        ],
                     },
                 )
                 break

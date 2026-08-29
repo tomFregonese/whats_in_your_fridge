@@ -342,3 +342,96 @@ def test_respond_resumes_recipes_phase_clarification(client: TestClient) -> None
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
     assert mock_run.call_args.kwargs["selected_dish_names"] == ["Carrot soup"]
+
+
+def _plats_proposed_using_stock(stock_id: int) -> loop.PlatsProposed:
+    result = _plats_proposed()
+    result.suggestions[0].used_stock_item_ids_json = f"[{stock_id}]"
+    return result
+
+
+def test_select_deducts_reported_stock_items_from_the_fridge(client: TestClient) -> None:
+    _setup(client)
+    stock_item = client.post(
+        "/api/fridge-stock", json={"ingredient_name": "carrot", "quantity_raw": "3"}
+    ).json()
+    stock_id = stock_item["id"]
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run_ideas", return_value=_ideas_proposed()),
+    ):
+        propose_response = client.post(
+            "/api/suggestions",
+            json={
+                "mode": "batch",
+                "items": [
+                    {
+                        "ingredient_name": "carrot",
+                        "quantity_raw": "3",
+                        "fridge_stock_item_id": stock_id,
+                    }
+                ],
+            },
+        )
+    run_id = propose_response.json()["run_id"]
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch(
+            "app.services.suggestion_service.loop.run",
+            return_value=_plats_proposed_using_stock(stock_id),
+        ) as mock_run,
+    ):
+        response = client.post(
+            f"/api/suggestions/runs/{run_id}/select", json={"selected_indexes": [0]}
+        )
+
+    assert mock_run.call_args.kwargs["known_stock_item_ids"] == {stock_id}
+
+    body = response.json()
+    assert [item["id"] for item in body["removed_stock_items"]] == [stock_id]
+
+    remaining = client.get("/api/fridge-stock").json()
+    assert remaining == []
+
+
+def test_select_does_not_deduct_stock_items_the_recipe_did_not_report_using(
+    client: TestClient,
+) -> None:
+    _setup(client)
+    stock_item = client.post(
+        "/api/fridge-stock", json={"ingredient_name": "carrot", "quantity_raw": "3"}
+    ).json()
+    stock_id = stock_item["id"]
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run_ideas", return_value=_ideas_proposed()),
+    ):
+        propose_response = client.post(
+            "/api/suggestions",
+            json={
+                "mode": "batch",
+                "items": [
+                    {
+                        "ingredient_name": "carrot",
+                        "quantity_raw": "3",
+                        "fridge_stock_item_id": stock_id,
+                    }
+                ],
+            },
+        )
+    run_id = propose_response.json()["run_id"]
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run", return_value=_plats_proposed()),
+    ):
+        response = client.post(
+            f"/api/suggestions/runs/{run_id}/select", json={"selected_indexes": [0]}
+        )
+
+    assert response.json()["removed_stock_items"] == []
+    remaining = client.get("/api/fridge-stock").json()
+    assert [item["id"] for item in remaining] == [stock_id]

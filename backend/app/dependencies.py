@@ -15,12 +15,14 @@ from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
 from app.persistence.repositories.feedback_repository import FeedbackRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
+from app.persistence.repositories.fridge_stock_repository import FridgeStockRepository
 from app.persistence.repositories.preference_note_repository import PreferenceNoteRepository
 from app.persistence.repositories.settings_repository import SettingsRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
 from app.services.allergy_service import AllergyService
 from app.services.feedback_service import FeedbackService
+from app.services.fridge_stock_service import FridgeStockService
 from app.services.meal_plan_service import MealPlanService
 from app.services.onboarding_service import OnboardingService
 from app.services.preference_service import PreferenceService
@@ -78,6 +80,18 @@ def get_fridge_input_repository(
     return FridgeInputRepository(session)
 
 
+def get_fridge_stock_repository(
+    session: Session = Depends(get_session),
+) -> FridgeStockRepository:
+    return FridgeStockRepository(session)
+
+
+def get_fridge_stock_service(
+    repository: FridgeStockRepository = Depends(get_fridge_stock_repository),
+) -> FridgeStockService:
+    return FridgeStockService(repository)
+
+
 def get_agent_run_repository(session: Session = Depends(get_session)) -> AgentRunRepository:
     return AgentRunRepository(session)
 
@@ -101,6 +115,7 @@ def get_suggestion_service(
     settings_service: SettingsService = Depends(get_settings_service),
     security_service: SecurityService = Depends(get_security_service),
     dedup_provider: DedupProvider = Depends(get_dedup_provider),
+    fridge_stock_service: FridgeStockService = Depends(get_fridge_stock_service),
 ) -> SuggestionService:
     return SuggestionService(
         fridge_input_repository,
@@ -111,6 +126,7 @@ def get_suggestion_service(
         settings_service,
         security_service,
         dedup_provider,
+        fridge_stock_service,
     )
 
 

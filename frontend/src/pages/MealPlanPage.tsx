@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
+import { addFridgeStockItem } from "../api/fridgeStock";
 import type { MealPlan } from "../api/mealPlans";
 import { getMealPlan } from "../api/mealPlans";
+import type { RemovedStockItem } from "../api/suggestions";
 import { AppLayout } from "../components/AppLayout";
 import { SingleDish } from "../components/SingleDish";
 import { WeekPlan } from "../components/WeekPlan";
@@ -10,19 +12,26 @@ import { WeekPlan } from "../components/WeekPlan";
  * (single) — branches on the persisted plan's `mode`.
  *
  * Reached either right after a generation completes (`FridgeInputForm`
- * navigates here and passes the fresh `notes_generales` via router state —
- * it isn't persisted, see the backend's `SuggestionService` docstring, so
- * it's only present on that first visit) or from `MealPlanHistory` (no
- * state — notes are simply absent on replays).
+ * navigates here and passes the fresh `notes_generales`/`removedStockItems`
+ * via router state — neither is persisted, see the backend's
+ * `SuggestionService` docstring, so both are only present on that first
+ * visit) or from `MealPlanHistory` (no state — both are simply absent on
+ * replays).
  */
 export function MealPlanPage() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
-  const notesGenerales = (location.state as { notesGenerales?: string | null } | null)
-    ?.notesGenerales;
+  const state = location.state as {
+    notesGenerales?: string | null;
+    removedStockItems?: RemovedStockItem[];
+  } | null;
+  const notesGenerales = state?.notesGenerales;
 
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [removedStockItems, setRemovedStockItems] = useState<RemovedStockItem[]>(
+    state?.removedStockItems ?? [],
+  );
 
   useEffect(() => {
     setMealPlan(null);
@@ -57,8 +66,46 @@ export function MealPlanPage() {
     );
   }
 
+  async function handlePutBack(item: RemovedStockItem): Promise<void> {
+    await addFridgeStockItem({
+      ingredient_name: item.ingredient_name,
+      quantity_value: item.quantity_value,
+      quantity_unit: item.quantity_unit,
+      quantity_raw: item.quantity_raw,
+    });
+    setRemovedStockItems((prev) => prev.filter((i) => i.id !== item.id));
+  }
+
   return (
     <AppLayout>
+      {removedStockItems.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <h2>🧊 Updated your fridge</h2>
+          </div>
+          <p className="card-description">
+            These were used in this plan and removed from your fridge stock.
+          </p>
+          <ul className="fridge-item-list">
+            {removedStockItems.map((item) => (
+              <li key={item.id} className="fridge-item-row">
+                <span className="fridge-item-name">
+                  {item.ingredient_name}
+                  {item.quantity_raw && <span className="model-meta"> · {item.quantity_raw}</span>}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => void handlePutBack(item)}
+                >
+                  Put back
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {mealPlan.mode === "single" ? (
         <SingleDish suggestions={mealPlan.suggestions} notesGenerales={notesGenerales} />
       ) : (

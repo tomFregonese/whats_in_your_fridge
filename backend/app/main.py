@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from app.controllers import (
     allergies,
     auth,
+    fridge_stock,
     health,
     meal_plans,
     onboarding,
@@ -19,14 +20,17 @@ from app.services.exceptions import (
     InvalidPasswordError,
     ModelNotConfiguredError,
     ModelUnavailableError,
+    NlpUnavailableError,
     NotFoundError,
     NotOnboardedError,
     OpenRouterAuthError,
     OpenRouterConnectionError,
     OpenRouterEmptyResponseError,
     OpenRouterRateLimitError,
+    OpenRouterRequestError,
     OpenRouterTimeoutError,
     PasswordAlreadySetError,
+    SttUnavailableError,
     TokenNotConfiguredError,
     VaultLockedError,
 )
@@ -123,6 +127,23 @@ async def handle_openrouter_empty_response(
     return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
+@app.exception_handler(OpenRouterRequestError)
+async def handle_openrouter_request_error(
+    request: Request, exc: OpenRouterRequestError
+) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+@app.exception_handler(SttUnavailableError)
+async def handle_stt_unavailable(request: Request, exc: SttUnavailableError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+@app.exception_handler(NlpUnavailableError)
+async def handle_nlp_unavailable(request: Request, exc: NlpUnavailableError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
 @app.exception_handler(AgentResponseInvalidError)
 async def handle_agent_response_invalid(
     request: Request, exc: AgentResponseInvalidError
@@ -147,6 +168,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(allergies.router, prefix="/api")
+app.include_router(fridge_stock.router, prefix="/api")
 app.include_router(preferences.router, prefix="/api")
 app.include_router(suggestions.router, prefix="/api")
 app.include_router(meal_plans.router, prefix="/api")

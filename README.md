@@ -23,7 +23,7 @@ if that's what's on your machine.
 `start.sh`/`start.bat` only ever *launch* the images already built by `update.sh`/`update.bat` —
 they never build, and fail with a clear message if no image has been built yet, rather than
 silently building one. This keeps what's actually running predictable: it only ever changes when
-you explicitly ask it to, via `update.sh`. Waits until both containers report healthy before
+you explicitly ask it to, via `update.sh`. Waits until all containers report healthy before
 printing the URL to open.
 
 On first launch, the UI walks you through setup (app password, OpenRouter token, model choice,
@@ -57,8 +57,18 @@ Your `data/fridge.db` is untouched by either step.
 
 ### Troubleshooting
 
-`docker compose ps` shows both containers' health status. If one is stuck `unhealthy` or keeps
-restarting, `docker compose logs api` or `docker compose logs frontend` has the detail.
+`docker compose ps` shows every container's health status (`frontend`, `api`, and two internal-only
+helper services: `stt` for local speech-to-text and `nlp` for local dictation structuring — see
+"Voice dictation" below). If one is stuck `unhealthy` or keeps restarting, `docker compose logs
+<service>` has the detail.
+
+## Voice dictation
+
+Dictating fridge items (the mic button on the Fridge page) is fully local and needs no OpenRouter
+token: audio is transcribed by a small self-hosted Whisper model (`stt` service), then structured
+into ingredient/quantity rows by a small self-hosted chat model (`nlp` service, Qwen2.5-1.5B) —
+neither step reaches the internet. Both models are baked into their images at `update.sh` time, so
+the first dictation after `start.sh` works immediately, no download.
 
 ## Data and backups
 

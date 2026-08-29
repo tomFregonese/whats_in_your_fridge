@@ -3,7 +3,13 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from app.agent.output_schema import IdeeArgs, PlatArgs, PlatIngredient, ProposerIdeesArgs
+from app.agent.output_schema import (
+    DictatedItemArgs,
+    IdeeArgs,
+    PlatArgs,
+    PlatIngredient,
+    ProposerIdeesArgs,
+)
 from app.domain.suggestion import AllergyCheckStatus
 
 
@@ -49,3 +55,25 @@ def test_proposer_idees_args_requires_at_least_one_idee() -> None:
 
     with pytest.raises(ValidationError):
         ProposerIdeesArgs.model_validate({"idees": [], "notes_generales": None})
+
+
+@pytest.mark.parametrize("literal", ["null", "NULL", "None", "", "  "])
+def test_dictated_item_args_treats_stringly_null_as_none(literal: str) -> None:
+    # Regression test: under grammar-constrained JSON decoding, a small
+    # model occasionally emits the literal string "null" (schema-valid —
+    # it's a string, as allowed) instead of the JSON `null` for one of
+    # these optional fields.
+    item = DictatedItemArgs(
+        ingredient_name="carrot", quantity_value=3, quantity_unit=literal, quantity_raw=literal
+    )
+
+    assert item.quantity_unit is None
+    assert item.quantity_raw is None
+
+
+def test_dictated_item_args_keeps_a_real_unit() -> None:
+    item = DictatedItemArgs(
+        ingredient_name="carrot", quantity_value=3, quantity_unit="kg", quantity_raw=None
+    )
+
+    assert item.quantity_unit == "kg"

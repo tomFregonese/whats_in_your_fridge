@@ -64,6 +64,15 @@ class OpenRouterEmptyResponseError(OpenRouterError):
     """OpenRouter responded successfully but with no usable content."""
 
 
+class OpenRouterRequestError(OpenRouterError):
+    """OpenRouter rejected the request itself (4xx/5xx) for a reason not
+    covered by the more specific `OpenRouterError` subclasses above — e.g.
+    a model that doesn't actually support the input it was sent (see
+    `agent/dictation.py`'s audio calls), a malformed request, or an
+    upstream 5xx. Carries whatever detail OpenRouter's response body gave,
+    so it's diagnosable rather than an opaque failure."""
+
+
 class AgentResponseInvalidError(Exception):
     """The model failed to produce a valid tool call after all retries."""
 
@@ -74,3 +83,11 @@ class ModelNotConfiguredError(Exception):
 
 class ModelUnavailableError(Exception):
     """The configured OpenRouter model is no longer in the live `:free` catalog."""
+
+
+class SttUnavailableError(Exception):
+    """The local `stt` (speech-to-text) service couldn't be reached."""
+
+
+class NlpUnavailableError(Exception):
+    """The local `nlp` (dictation-structuring) service couldn't be reached."""

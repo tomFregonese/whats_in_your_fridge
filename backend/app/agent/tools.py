@@ -6,11 +6,21 @@ tool is offered alongside it depends on the phase (see `AgentRunPhase`):
 ingredients/steps) or `proposer_plats` in `RECIPES` (the full recipe for
 whichever idea(s) the user already picked) — see `agent/prompts.py` for
 the phase-specific instructions that tell the model so.
+
+Voice dictation used to have a third tool here (`enregistrer_ingredients`)
+for its own OpenRouter tool-calling loop — that loop now runs against a
+local, grammar-constrained model instead (see `agent/dictation.py`),
+which doesn't go through OpenAI-style tool-calling at all, so there's
+nothing to declare here for it any more.
 """
 
 from openai.types.chat import ChatCompletionToolParam
 
-from app.agent.output_schema import DemanderPrecisionArgs, ProposerIdeesArgs, ProposerPlatsArgs
+from app.agent.output_schema import (
+    DemanderPrecisionArgs,
+    ProposerIdeesArgs,
+    ProposerPlatsArgs,
+)
 from app.domain.agent_run import AgentRunPhase
 
 DEMANDER_PRECISION = "demander_precision"

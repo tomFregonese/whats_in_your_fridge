@@ -29,6 +29,12 @@ class Suggestion:
     steps_json: str
     servings: int
     allergy_check_status: AllergyCheckStatus
+    used_stock_item_ids_json: str = "[]"
+    """JSON list of `FridgeStockItem` ids this dish reported using (see
+    `agent/output_schema.py::PlatArgs.ingredients_stock_ids`, sanitized by
+    `agent/stock_reference_check.py`). Read once, right after a meal plan
+    is persisted, by `FridgeStockService.deduct()` — never touched again
+    afterward."""
 
 
 @dataclass

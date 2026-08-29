@@ -15,6 +15,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
               Home
             </NavLink>
+            <NavLink to="/fridge" className={({ isActive }) => (isActive ? "active" : "")}>
+              🧊 Fridge
+            </NavLink>
             <NavLink to="/history" className={({ isActive }) => (isActive ? "active" : "")}>
               History
             </NavLink>

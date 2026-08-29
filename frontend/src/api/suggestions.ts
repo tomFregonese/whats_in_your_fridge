@@ -3,6 +3,7 @@ import { api } from "./client";
 export interface FridgeInputItemPayload {
   ingredient_name: string;
   quantity_raw?: string;
+  fridge_stock_item_id?: number;
 }
 
 export interface FridgeInputPayload {
@@ -18,6 +19,19 @@ export interface Suggestion {
   ingredients: string[];
   steps: string[];
   servings: number;
+}
+
+/** One fridge stock item automatically removed once a meal plan completes
+ * (see the backend's `SuggestionService`/`FridgeStockService.deduct`).
+ * Like `notes_generales`, only ever present on the response of the
+ * generation call that produced it — never on a later `GET
+ * /api/meal-plans/{id}` replay. */
+export interface RemovedStockItem {
+  id: number;
+  ingredient_name: string;
+  quantity_value: number | null;
+  quantity_unit: string | null;
+  quantity_raw: string | null;
 }
 
 /** One proposed dish idea — name + description only, no ingredients/steps
@@ -36,6 +50,7 @@ export interface SuggestionsResult {
   suggestions: Suggestion[];
   ideas: DishIdea[];
   notes_generales: string | null;
+  removed_stock_items: RemovedStockItem[];
   run_id: number | null;
   question: string | null;
   options: string[] | null;

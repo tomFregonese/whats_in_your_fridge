@@ -63,6 +63,7 @@ def _start(session: Session, *, mode: FridgeInputMode = FridgeInputMode.BATCH) -
         settings_service=MagicMock(),
         security_service=MagicMock(),
         dedup_provider=MagicMock(),
+        fridge_stock_service=MagicMock(),
     )
     return run_id
 

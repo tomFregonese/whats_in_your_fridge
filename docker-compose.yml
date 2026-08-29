@@ -4,11 +4,34 @@ services:
     environment:
       DB_PATH: /data/fridge.db
       HISTORY_WINDOW_N: ${HISTORY_WINDOW_N:-10}
+      STT_URL: http://stt:8001
+      NLP_URL: http://nlp:8002
     volumes:
       - ./data:/data
+    depends_on:
+      stt:
+        condition: service_healthy
+      nlp:
+        condition: service_healthy
     restart: unless-stopped
     # No `ports:` here on purpose — the API is reachable only from the
     # `frontend` service over Docker's internal network.
+
+  stt:
+    build: ./stt
+    restart: unless-stopped
+    # Local speech-to-text for voice dictation (see backend's
+    # `agent/stt_client.py`) — audio never leaves the machine. Reachable
+    # only from `api`, same "no `ports:`" convention as `api` itself.
+
+  nlp:
+    build: ./nlp
+    restart: unless-stopped
+    # Local text-structuring for voice dictation (see backend's
+    # `agent/nlp_client.py`) — a small grammar-constrained local model
+    # turns a dictated transcript into structured ingredient/quantity
+    # rows, so this feature needs no OpenRouter token or internet access.
+    # Reachable only from `api`, same "no `ports:`" convention as `stt`.
 
   frontend:
     build: ./frontend

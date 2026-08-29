@@ -15,6 +15,12 @@ class Settings(BaseSettings):
 
     db_path: str = "/data/fridge.db"
     history_window_n: int = 10
+    # Internal-only Docker Compose service name (see `docker-compose.yml`'s
+    # `stt` service) — never reachable from outside the Docker network.
+    stt_url: str = "http://stt:8001"
+    # Same, for the local dictation-structuring service (see
+    # `docker-compose.yml`'s `nlp` service).
+    nlp_url: str = "http://nlp:8002"
 
 
 settings = Settings()

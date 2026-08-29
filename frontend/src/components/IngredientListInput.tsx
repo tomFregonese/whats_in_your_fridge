@@ -9,9 +9,14 @@ export interface IngredientEntry {
 interface IngredientListInputProps {
   items: IngredientEntry[];
   onChange: (items: IngredientEntry[]) => void;
+  label?: string;
 }
 
-export function IngredientListInput({ items, onChange }: IngredientListInputProps) {
+export function IngredientListInput({
+  items,
+  onChange,
+  label = "Ingredients",
+}: IngredientListInputProps) {
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("");
 
@@ -39,7 +44,7 @@ export function IngredientListInput({ items, onChange }: IngredientListInputProp
 
   return (
     <div className="field">
-      <span className="field-label">Ingredients</span>
+      <span className="field-label">{label}</span>
       <div className="ingredient-input-row">
         <input
           type="text"

@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppGate } from "./components/AppGate";
+import { Fridge } from "./pages/Fridge";
 import { Home } from "./pages/Home";
 import { MealPlanHistory } from "./pages/MealPlanHistory";
 import { MealPlanPage } from "./pages/MealPlanPage";
@@ -27,6 +28,14 @@ function App() {
           element={
             <AppGate>
               <MealPlanPage />
+            </AppGate>
+          }
+        />
+        <Route
+          path="/fridge"
+          element={
+            <AppGate>
+              <Fridge />
             </AppGate>
           }
         />

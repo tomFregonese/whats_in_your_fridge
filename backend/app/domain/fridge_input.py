@@ -14,7 +14,16 @@ class FridgeInputMode(StrEnum):
 
 @dataclass
 class FridgeInputItem:
-    """One structured ingredient entry attached to a `FridgeInput`."""
+    """One structured ingredient entry attached to a `FridgeInput`.
+
+    `fridge_stock_item_id` is set when this entry came from picking a chip
+    on `FridgeStockPicker` (frontend) rather than being typed one-off — it
+    links back to the persistent `FridgeStockItem` (see
+    `app.domain.fridge_stock`) so the `RECIPES` phase can later tell the
+    model its id (see `agent/prompts.py::_format_item`) and, once the model
+    reports using it, `FridgeStockService.deduct()` knows which stock row
+    to remove. `None` for free-typed, not-tracked-in-stock ingredients.
+    """
 
     id: int | None
     fridge_input_id: int | None
@@ -22,6 +31,7 @@ class FridgeInputItem:
     quantity_value: float | None
     quantity_unit: str | None
     quantity_raw: str | None
+    fridge_stock_item_id: int | None = None
 
 
 @dataclass

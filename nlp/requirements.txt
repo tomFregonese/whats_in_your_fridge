@@ -1,0 +1,4 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+llama-cpp-python>=0.3.2
+huggingface_hub>=0.24

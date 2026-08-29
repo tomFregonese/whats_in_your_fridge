@@ -18,6 +18,7 @@ from app.persistence.entities.fridge_input_entity import (
     FridgeInputEntity,
     FridgeInputItemEntity,
 )
+from app.persistence.entities.fridge_stock_item_entity import FridgeStockItemEntity
 from app.persistence.entities.preference_note_entity import PreferenceNoteEntity
 from app.persistence.entities.settings_entity import SettingsEntity
 from app.persistence.entities.suggestion_entity import MealPlanEntity, SuggestionEntity
@@ -29,6 +30,7 @@ __all__ = [
     "FeedbackEntity",
     "FridgeInputEntity",
     "FridgeInputItemEntity",
+    "FridgeStockItemEntity",
     "MealPlanEntity",
     "PreferenceNoteEntity",
     "SettingsEntity",

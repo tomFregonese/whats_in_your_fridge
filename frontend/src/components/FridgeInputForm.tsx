@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import type { DishIdea } from "../api/suggestions";
+import type { FridgeStockItem } from "../api/fridgeStock";
+import { listFridgeStockItems } from "../api/fridgeStock";
+import type { DishIdea, RemovedStockItem } from "../api/suggestions";
 import {
   createSuggestionsStream,
   respondToClarificationStream,
@@ -10,6 +12,7 @@ import {
 import { ApiErrorMessage } from "./ApiErrorMessage";
 import { ClarificationModal } from "./ClarificationModal";
 import { DishIdeaSelector } from "./DishIdeaSelector";
+import { FridgeStockPicker } from "./FridgeStockPicker";
 import { ReasoningBlock } from "./ReasoningBlock";
 import type { IngredientEntry } from "./IngredientListInput";
 import { IngredientListInput } from "./IngredientListInput";
@@ -30,12 +33,15 @@ interface SseEvent {
   ideas?: DishIdea[];
   meal_plan_id?: number;
   notes_generales?: string | null;
+  removed_stock_items?: RemovedStockItem[];
   detail?: string;
 }
 
 export function FridgeInputForm() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<"batch" | "single">("batch");
+  const [stockItems, setStockItems] = useState<FridgeStockItem[]>([]);
+  const [selectedStockIds, setSelectedStockIds] = useState<number[]>([]);
   const [ingredients, setIngredients] = useState<IngredientEntry[]>([]);
   const [freeText, setFreeText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -60,6 +66,12 @@ export function FridgeInputForm() {
 
   // Cleanup on unmount
   useEffect(() => cleanup, [cleanup]);
+
+  // Loaded once on mount — the picker below reads from it, and submit
+  // needs the full items (not just ids) to build the request payload.
+  useEffect(() => {
+    void listFridgeStockItems().then(setStockItems);
+  }, []);
 
   /** Handle a single SSE event — called synchronously from the message handler. */
   const handleSseEvent = useCallback(
@@ -91,7 +103,10 @@ export function FridgeInputForm() {
           setStreamingActive(false);
           if (event.meal_plan_id) {
             navigate(`/plan/${String(event.meal_plan_id)}`, {
-              state: { notesGenerales: event.notes_generales ?? null },
+              state: {
+                notesGenerales: event.notes_generales ?? null,
+                removedStockItems: event.removed_stock_items ?? [],
+              },
             });
           }
           break;
@@ -143,8 +158,8 @@ export function FridgeInputForm() {
   const handleSubmit = useCallback(
     async (event: FormEvent): Promise<void> => {
       event.preventDefault();
-      if (ingredients.length === 0 && !freeText.trim()) {
-        setError("Add at least one ingredient or describe what's in your fridge.");
+      if (selectedStockIds.length === 0 && ingredients.length === 0 && !freeText.trim()) {
+        setError("Pick something from your fridge, add an ingredient, or describe what you have.");
         return;
       }
 
@@ -156,13 +171,21 @@ export function FridgeInputForm() {
       cleanup();
 
       try {
+        const selectedStockItems = stockItems.filter((item) => selectedStockIds.includes(item.id));
         const { run_id } = await createSuggestionsStream({
           mode,
           free_text: freeText.trim() || undefined,
-          items: ingredients.map((item) => ({
-            ingredient_name: item.name,
-            quantity_raw: item.quantity || undefined,
-          })),
+          items: [
+            ...selectedStockItems.map((item) => ({
+              ingredient_name: item.ingredient_name,
+              quantity_raw: item.quantity_raw || undefined,
+              fridge_stock_item_id: item.id,
+            })),
+            ...ingredients.map((item) => ({
+              ingredient_name: item.name,
+              quantity_raw: item.quantity || undefined,
+            })),
+          ],
         });
 
         runIdRef.current = run_id;
@@ -198,7 +221,7 @@ export function FridgeInputForm() {
         setStreamingActive(false);
       }
     },
-    [ingredients, freeText, mode, cleanup, handleSseEvent],
+    [selectedStockIds, stockItems, ingredients, freeText, mode, cleanup, handleSseEvent],
   );
 
   return (
@@ -230,7 +253,20 @@ export function FridgeInputForm() {
             </div>
           </div>
 
-          <IngredientListInput items={ingredients} onChange={setIngredients} />
+          <div className="field">
+            <span className="field-label">From your fridge</span>
+            <FridgeStockPicker
+              items={stockItems}
+              selectedIds={selectedStockIds}
+              onChange={setSelectedStockIds}
+            />
+          </div>
+
+          <IngredientListInput
+            items={ingredients}
+            onChange={setIngredients}
+            label="Anything else not in your fridge list?"
+          />
 
           <div className="field">
             <label htmlFor="free-text">Anything else? (optional)</label>

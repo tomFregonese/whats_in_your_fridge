@@ -72,6 +72,14 @@ def build_system_prompt(
             "still ambiguous, call `demander_precision` instead of guessing — never "
             "answer with plain text."
         )
+        lines.append(
+            "Some fridge items are tagged `[stock#ID]` in the fridge contents below — these "
+            "are tracked in the household's persistent inventory. For each dish, set "
+            "`ingredients_stock_ids` to the IDs (numbers only, without the `stock#` prefix) "
+            "of exactly the tagged items that dish actually uses, so they can be removed "
+            "from stock automatically. Leave it empty if none apply, and never invent an ID "
+            "that wasn't given to you."
+        )
 
     return "\n".join(lines)
 
@@ -99,4 +107,7 @@ def _format_item(item: FridgeInputItem) -> str:
     quantity = item.quantity_raw
     if quantity is None and item.quantity_value is not None:
         quantity = f"{item.quantity_value} {item.quantity_unit or ''}".strip()
-    return f"{item.ingredient_name} ({quantity})" if quantity else item.ingredient_name
+    name = f"{item.ingredient_name} ({quantity})" if quantity else item.ingredient_name
+    if item.fridge_stock_item_id is not None:
+        return f"[stock#{item.fridge_stock_item_id}] {name}"
+    return name

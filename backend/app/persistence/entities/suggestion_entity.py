@@ -48,6 +48,7 @@ class SuggestionEntity(SQLModel, table=True):
     steps_json: str
     servings: int
     allergy_check_status: str
+    used_stock_item_ids_json: str = "[]"
 
     def to_domain(self) -> Suggestion:
         return Suggestion(
@@ -59,6 +60,7 @@ class SuggestionEntity(SQLModel, table=True):
             steps_json=self.steps_json,
             servings=self.servings,
             allergy_check_status=AllergyCheckStatus(self.allergy_check_status),
+            used_stock_item_ids_json=self.used_stock_item_ids_json,
         )
 
     @classmethod
@@ -74,4 +76,5 @@ class SuggestionEntity(SQLModel, table=True):
             steps_json=suggestion.steps_json,
             servings=suggestion.servings,
             allergy_check_status=suggestion.allergy_check_status.value,
+            used_stock_item_ids_json=suggestion.used_stock_item_ids_json,
         )

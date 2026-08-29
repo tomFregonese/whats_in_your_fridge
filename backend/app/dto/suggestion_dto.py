@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.domain.suggestion import MealPlan, Suggestion
 from app.dto.dish_idea_dto import DishIdeaDtoOut
+from app.dto.fridge_stock_dto import FridgeStockItemDtoOut
 
 
 class SuggestionDtoOut(BaseModel):
@@ -48,6 +49,14 @@ class SuggestionsResultDtoOut(BaseModel):
     `suggestions` directly. `ideas` is only set for `ideas_proposed` — the
     `IDEAS`-phase shortlist the user must pick from via
     `POST .../runs/{run_id}/select` before a `completed` result exists.
+
+    `removed_stock_items` (only set for `completed`) is, like
+    `notes_generales`, deliberately **not persisted** — there's no join
+    table recording it on `meal_plan` — so it's only present on the
+    response of the call that produced it, not on later reads of the same
+    plan via `GET /api/meal-plans/{id}`. It's what let the frontend
+    (`MealPlanPage`) show what auto-deduction removed from the fridge stock
+    right after this generation, with a "put back" undo per item.
     """
 
     status: Literal["completed", "clarification_needed", "ideas_proposed"]
@@ -56,6 +65,7 @@ class SuggestionsResultDtoOut(BaseModel):
     suggestions: list[SuggestionDtoOut] = Field(default_factory=list)
     ideas: list[DishIdeaDtoOut] = Field(default_factory=list)
     notes_generales: str | None = None
+    removed_stock_items: list[FridgeStockItemDtoOut] = Field(default_factory=list)
     run_id: int | None = None
     question: str | None = None
     options: list[str] | None = None

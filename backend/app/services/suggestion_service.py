@@ -19,7 +19,7 @@ same plan via `GET /api/meal-plans/{id}`.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from openai.types.chat import ChatCompletionMessageParam
@@ -30,6 +30,7 @@ from app.agent.dedup import DedupProvider
 from app.domain.agent_run import AgentRun, AgentRunPhase, AgentRunStatus
 from app.domain.dish_idea import DishIdea
 from app.domain.fridge_input import FridgeInput
+from app.domain.fridge_stock import FridgeStockItem
 from app.domain.suggestion import MealPlan, Suggestion
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
@@ -42,6 +43,7 @@ from app.services.exceptions import (
     ModelUnavailableError,
     NotFoundError,
 )
+from app.services.fridge_stock_service import FridgeStockService
 from app.services.settings_service import SettingsService
 
 
@@ -64,6 +66,7 @@ class CompletedOutcome:
     meal_plan_id: int
     suggestions: list[Suggestion]
     notes_generales: str | None
+    removed_stock_items: list[FridgeStockItem] = field(default_factory=list)
 
 
 SuggestionOutcome = ClarificationOutcome | IdeasOutcome | CompletedOutcome
@@ -80,6 +83,7 @@ class SuggestionService:
         settings_service: SettingsService,
         security_service: SecurityService,
         dedup_provider: DedupProvider,
+        fridge_stock_service: FridgeStockService,
     ) -> None:
         self._fridge_input_repository = fridge_input_repository
         self._agent_run_repository = agent_run_repository
@@ -89,6 +93,7 @@ class SuggestionService:
         self._settings_service = settings_service
         self._security_service = security_service
         self._dedup_provider = dedup_provider
+        self._fridge_stock_service = fridge_stock_service
 
     def generate(self, fridge_input: FridgeInput) -> tuple[int, SuggestionOutcome]:
         saved_input = self._fridge_input_repository.add(fridge_input)
@@ -225,6 +230,14 @@ class SuggestionService:
         selected_dish_names: list[str],
         existing_run_id: int,
     ) -> SuggestionOutcome:
+        fridge_input = self._fridge_input_repository.get(fridge_input_id)
+        assert fridge_input is not None
+        known_stock_item_ids = {
+            item.fridge_stock_item_id
+            for item in fridge_input.items
+            if item.fridge_stock_item_id is not None
+        }
+
         token, model = self._token_and_model()
         result = loop.run(
             token=token,
@@ -232,6 +245,7 @@ class SuggestionService:
             messages=messages,
             allergies=self._allergy_repository.list_all(),
             selected_dish_names=selected_dish_names,
+            known_stock_item_ids=known_stock_item_ids,
         )
 
         if isinstance(result, loop.ClarificationNeeded):
@@ -255,9 +269,6 @@ class SuggestionService:
             return ClarificationOutcome(
                 run_id=saved_run.id, question=result.question, options=result.options
             )
-
-        fridge_input = self._fridge_input_repository.get(fridge_input_id)
-        assert fridge_input is not None
 
         existing = self._agent_run_repository.get(existing_run_id)
         assert existing is not None
@@ -284,9 +295,21 @@ class SuggestionService:
         )
         assert saved_meal_plan.id is not None
 
+        used_stock_ids = sorted(
+            {
+                stock_id
+                for suggestion in saved_meal_plan.suggestions
+                for stock_id in json.loads(suggestion.used_stock_item_ids_json)
+            }
+        )
+        removed_items = (
+            self._fridge_stock_service.deduct(used_stock_ids) if used_stock_ids else []
+        )
+
         return CompletedOutcome(
             meal_plan_id=saved_meal_plan.id,
             suggestions=saved_meal_plan.suggestions,
+            removed_stock_items=removed_items,
             notes_generales=result.notes_generales,
         )
 
