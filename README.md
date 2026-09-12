@@ -53,6 +53,8 @@ Pull the latest code, then:
 ./start.sh    # picks up the newly built image and restarts; DB schema changes apply automatically
 ```
 
+Or `./redeploy.sh` (`redeploy.bat`) to run both in one go.
+
 Your `data/fridge.db` is untouched by either step.
 
 ### Troubleshooting
