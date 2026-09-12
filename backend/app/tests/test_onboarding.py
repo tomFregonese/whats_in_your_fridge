@@ -24,6 +24,7 @@ def test_complete_onboarding_creates_settings_and_seeds_allergies_and_preference
     assert response.json() == {
         "default_servings": 4,
         "openrouter_model_id": None,
+        "freezer_capacity_slots": None,
         "openrouter_token_configured": False,
     }
 

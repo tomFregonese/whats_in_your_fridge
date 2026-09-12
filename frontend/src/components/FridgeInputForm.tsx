@@ -37,9 +37,14 @@ interface SseEvent {
   detail?: string;
 }
 
+const DEFAULT_DAYS = 5;
+const MIN_DAYS = 1;
+const MAX_DAYS = 14;
+
 export function FridgeInputForm() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<"batch" | "single">("batch");
+  const [days, setDays] = useState(DEFAULT_DAYS);
   const [stockItems, setStockItems] = useState<FridgeStockItem[]>([]);
   const [selectedStockIds, setSelectedStockIds] = useState<number[]>([]);
   const [ingredients, setIngredients] = useState<IngredientEntry[]>([]);
@@ -174,6 +179,7 @@ export function FridgeInputForm() {
         const selectedStockItems = stockItems.filter((item) => selectedStockIds.includes(item.id));
         const { run_id } = await createSuggestionsStream({
           mode,
+          days: mode === "batch" ? days : undefined,
           free_text: freeText.trim() || undefined,
           items: [
             ...selectedStockItems.map((item) => ({
@@ -221,7 +227,7 @@ export function FridgeInputForm() {
         setStreamingActive(false);
       }
     },
-    [selectedStockIds, stockItems, ingredients, freeText, mode, cleanup, handleSseEvent],
+    [selectedStockIds, stockItems, ingredients, freeText, mode, days, cleanup, handleSseEvent],
   );
 
   return (
@@ -252,6 +258,20 @@ export function FridgeInputForm() {
               </button>
             </div>
           </div>
+
+          {mode === "batch" && (
+            <div className="field">
+              <label htmlFor="days">Number of days to cook for</label>
+              <input
+                id="days"
+                type="number"
+                min={MIN_DAYS}
+                max={MAX_DAYS}
+                value={days}
+                onChange={(event) => setDays(Number(event.target.value))}
+              />
+            </div>
+          )}
 
           <div className="field">
             <span className="field-label">From your fridge</span>

@@ -9,6 +9,7 @@ from app.dependencies import (
     get_agent_run_repository,
     get_allergy_repository,
     get_dedup_provider,
+    get_equipment_repository,
     get_feedback_service,
     get_fridge_input_repository,
     get_fridge_stock_service,
@@ -23,6 +24,7 @@ from app.dto.feedback_dto import FeedbackDtoIn, FeedbackDtoOut
 from app.dto.fridge_input_dto import FridgeInputDtoIn
 from app.dto.fridge_stock_dto import FridgeStockItemDtoOut
 from app.dto.suggestion_dto import (
+    AgendaEntryDtoOut,
     RespondDtoIn,
     SelectDtoIn,
     SuggestionDtoOut,
@@ -30,6 +32,7 @@ from app.dto.suggestion_dto import (
 )
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
+from app.persistence.repositories.equipment_repository import EquipmentRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
@@ -76,6 +79,7 @@ def _to_dto(fridge_input_id: int, outcome: SuggestionOutcome) -> SuggestionsResu
         removed_stock_items=[
             FridgeStockItemDtoOut.from_domain(item) for item in outcome.removed_stock_items
         ],
+        agenda=[AgendaEntryDtoOut.from_domain(entry) for entry in outcome.agenda],
     )
 
 
@@ -124,6 +128,7 @@ def create_suggestions_stream(
     agent_run_repository: AgentRunRepository = Depends(get_agent_run_repository),
     suggestion_repository: SuggestionRepository = Depends(get_suggestion_repository),
     allergy_repository: AllergyRepository = Depends(get_allergy_repository),
+    equipment_repository: EquipmentRepository = Depends(get_equipment_repository),
     settings_service: SettingsService = Depends(get_settings_service),
     security_service: SecurityService = Depends(get_security_service),
     dedup_provider: DedupProvider = Depends(get_dedup_provider),
@@ -142,10 +147,12 @@ def create_suggestions_stream(
     system_prompt = prompts.build_system_prompt(
         default_servings=settings.default_servings,
         allergies=allergy_repository.list_all(),
+        equipment=equipment_repository.list_all(),
         preferences=[],
         dedup_context=dedup_provider.get_exclusion_context(),
         phase=AgentRunPhase.IDEAS,
         mode=saved_input.mode,
+        days=saved_input.days,
     )
     messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": system_prompt},
@@ -153,6 +160,7 @@ def create_suggestions_stream(
     ]
 
     allergies = allergy_repository.list_all()
+    equipment = equipment_repository.list_all()
 
     run_id = saved_input.id  # reuse the fridge_input id as the streaming run id
 
@@ -163,6 +171,7 @@ def create_suggestions_stream(
         token=token,
         model=settings.openrouter_model_id,
         allergies=allergies,
+        equipment=equipment,
         fridge_input_repository=fridge_input_repository,
         agent_run_repository=agent_run_repository,
         suggestion_repository=suggestion_repository,

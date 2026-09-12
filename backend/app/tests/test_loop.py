@@ -7,10 +7,12 @@ from openai.types.chat.chat_completion_message_function_tool_call import Functio
 
 from app.agent import loop
 from app.domain.allergy import Allergy
+from app.domain.equipment import Equipment
 from app.domain.suggestion import AllergyCheckStatus
 from app.services.exceptions import AgentResponseInvalidError
 
 PEANUT_ALLERGY = [Allergy(id=1, ingredient_name="peanut", notes=None)]
+OVEN_EQUIPMENT = [Equipment(id=1, name="oven")]
 
 VALID_PLATS_ARGS = json.dumps(
     {
@@ -21,6 +23,7 @@ VALID_PLATS_ARGS = json.dumps(
                 "portions": 4,
                 "ingredients": [{"nom": "carrot", "quantite": "3"}],
                 "etapes": ["Boil.", "Blend."],
+                "fridge_days": 3,
             }
         ],
         "notes_generales": None,
@@ -36,6 +39,7 @@ VIOLATING_PLATS_ARGS = json.dumps(
                 "portions": 4,
                 "ingredients": [{"nom": "peanut butter", "quantite": "2 tbsp"}],
                 "etapes": ["Mix.", "Serve."],
+                "fridge_days": 3,
             }
         ],
         "notes_generales": None,
@@ -51,6 +55,7 @@ MIXED_PLATS_ARGS = json.dumps(
                 "portions": 4,
                 "ingredients": [{"nom": "carrot"}],
                 "etapes": ["Boil."],
+                "fridge_days": 3,
             },
             {
                 "nom": "Peanut satay",
@@ -58,6 +63,7 @@ MIXED_PLATS_ARGS = json.dumps(
                 "portions": 4,
                 "ingredients": [{"nom": "peanut butter"}],
                 "etapes": ["Mix."],
+                "fridge_days": 3,
             },
         ],
         "notes_generales": None,
@@ -73,6 +79,24 @@ MISMATCHED_PLATS_ARGS = json.dumps(
                 "portions": 4,
                 "ingredients": [{"nom": "tomato", "quantite": "3"}],
                 "etapes": ["Boil.", "Blend."],
+                "fridge_days": 3,
+            }
+        ],
+        "notes_generales": None,
+    }
+)
+
+NEEDS_OVEN_PLATS_ARGS = json.dumps(
+    {
+        "plats": [
+            {
+                "nom": "Baked potato",
+                "description": "Oven-baked",
+                "portions": 4,
+                "ingredients": [{"nom": "potato", "quantite": "4"}],
+                "etapes": ["Bake."],
+                "equipment_used": ["oven"],
+                "fridge_days": 3,
             }
         ],
         "notes_generales": None,
@@ -118,13 +142,17 @@ def _messages() -> list[ChatCompletionMessageParam]:
 
 
 def _run(
-    *, allergies: list[Allergy] | None = None, selected_dish_names: list[str] | None = None
+    *,
+    allergies: list[Allergy] | None = None,
+    equipment: list[Equipment] | None = None,
+    selected_dish_names: list[str] | None = None,
 ) -> loop.LoopResult:
     return loop.run(
         token="tok",
         model="m",
         messages=_messages(),
         allergies=allergies if allergies else [],
+        equipment=equipment if equipment else [],
         selected_dish_names=(
             selected_dish_names if selected_dish_names is not None else ["Carrot soup"]
         ),
@@ -266,6 +294,49 @@ def test_loop_keeps_safe_dishes_and_drops_only_the_violating_one() -> None:
     dish_names = [s.dish_name for s in result.suggestions]
     assert dish_names == ["Carrot soup"]
     assert "Peanut satay" in (result.notes_generales or "")
+
+
+# --- Equipment check integration ---
+
+
+def test_loop_passes_through_dish_using_available_equipment() -> None:
+    message = _message(tool_calls=[_tool_call("call_1", "proposer_plats", NEEDS_OVEN_PLATS_ARGS)])
+    with patch("app.agent.loop.client.complete_with_tools", return_value=message):
+        result = _run(equipment=OVEN_EQUIPMENT, selected_dish_names=["Baked potato"])
+
+    assert isinstance(result, loop.PlatsProposed)
+    assert result.suggestions[0].dish_name == "Baked potato"
+
+
+def test_loop_regenerates_when_dish_needs_missing_equipment() -> None:
+    bad = _message(tool_calls=[_tool_call("call_1", "proposer_plats", NEEDS_OVEN_PLATS_ARGS)])
+    good = _message(tool_calls=[_tool_call("call_2", "proposer_plats", VALID_PLATS_ARGS)])
+    with (
+        patch(
+            "app.agent.loop.client.complete_with_tools", side_effect=[bad, good]
+        ) as mock_complete,
+    ):
+        result = _run(equipment=[], selected_dish_names=["Carrot soup"])
+
+    assert isinstance(result, loop.PlatsProposed)
+    assert result.suggestions[0].dish_name == "Carrot soup"
+    assert mock_complete.call_count == 2
+
+    final_messages = mock_complete.call_args_list[-1].kwargs["messages"]
+    tool_feedback = [m["content"] for m in final_messages if m.get("role") == "tool"]
+    assert any(fb and "oven" in fb and "Baked potato" in fb for fb in tool_feedback)
+
+
+def test_loop_drops_dish_that_keeps_needing_missing_equipment_after_all_retries() -> None:
+    bad = _message(tool_calls=[_tool_call("call_1", "proposer_plats", NEEDS_OVEN_PLATS_ARGS)])
+    with patch("app.agent.loop.client.complete_with_tools", return_value=bad) as mock_complete:
+        result = _run(equipment=[], selected_dish_names=["Baked potato"])
+
+    assert isinstance(result, loop.PlatsProposed)
+    assert result.suggestions == []
+    assert result.notes_generales is not None
+    assert "Baked potato" in result.notes_generales
+    assert mock_complete.call_count == loop.MAX_ATTEMPTS
 
 
 # --- Selection-match validation (two-phase dish selection) ---

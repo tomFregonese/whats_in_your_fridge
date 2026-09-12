@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from app.controllers import (
     allergies,
     auth,
+    equipment,
     fridge_stock,
     health,
     meal_plans,
@@ -168,6 +169,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(allergies.router, prefix="/api")
+app.include_router(equipment.router, prefix="/api")
 app.include_router(fridge_stock.router, prefix="/api")
 app.include_router(preferences.router, prefix="/api")
 app.include_router(suggestions.router, prefix="/api")

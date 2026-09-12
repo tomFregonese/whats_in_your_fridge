@@ -13,6 +13,8 @@
   --color-danger-soft: #fef2f2;
   --color-success: #16a34a;
   --color-success-soft: #f0fdf4;
+  --color-warning: #b45309;
+  --color-warning-soft: #fffbeb;
 
   /* Neutrals */
   --color-bg: #f8fafc;
@@ -57,6 +59,8 @@
     --color-danger-soft: #2a1316;
     --color-success: #4ade80;
     --color-success-soft: #10281a;
+    --color-warning: #fbbf24;
+    --color-warning-soft: #2a2007;
 
     --color-bg: #0b1120;
     --color-surface: #151f32;
@@ -75,7 +79,7 @@
 
 body {
   margin: 0;
-  font-family: var(--font-sans);
+  font-family: var(--font-sans), serif;
   background: var(--color-bg);
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;

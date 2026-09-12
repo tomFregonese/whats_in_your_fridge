@@ -68,7 +68,7 @@ def _create_suggestion(client: TestClient, dish_name: str = "Carrot soup") -> in
     ):
         first = client.post(
             "/api/suggestions",
-            json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]},
+            json={"mode": "batch", "days": 5, "items": [{"ingredient_name": "carrot"}]},
         )
     run_id = first.json()["run_id"]
 

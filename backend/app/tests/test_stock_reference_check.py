@@ -10,6 +10,7 @@ def _plat(*stock_ids: int) -> PlatArgs:
         ingredients=[PlatIngredient(nom="carrot")],
         etapes=["step"],
         ingredients_stock_ids=list(stock_ids),
+        fridge_days=3,
     )
 
 

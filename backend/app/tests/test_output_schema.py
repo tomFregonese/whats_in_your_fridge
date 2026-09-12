@@ -20,9 +20,11 @@ def test_plat_args_to_domain_formats_ingredients_with_quantity() -> None:
         portions=4,
         ingredients=[
             PlatIngredient(nom="carrot", quantite="3"),
-            PlatIngredient(nom="salt", quantite=None),
+            PlatIngredient(nom="salt", quantite=None, a_acheter=True),
         ],
         etapes=["Boil.", "Blend."],
+        fridge_days=4,
+        freezer_friendly=True,
     )
 
     suggestion = plat.to_domain()
@@ -30,8 +32,13 @@ def test_plat_args_to_domain_formats_ingredients_with_quantity() -> None:
     assert suggestion.dish_name == "Carrot soup"
     assert suggestion.servings == 4
     assert suggestion.allergy_check_status == AllergyCheckStatus.OK
-    assert json.loads(suggestion.ingredients_json) == ["carrot (3)", "salt"]
+    assert json.loads(suggestion.ingredients_json) == [
+        {"nom": "carrot", "quantite": "3", "a_acheter": False},
+        {"nom": "salt", "quantite": None, "a_acheter": True},
+    ]
     assert json.loads(suggestion.steps_json) == ["Boil.", "Blend."]
+    assert suggestion.fridge_days == 4
+    assert suggestion.freezer_friendly is True
 
 
 def test_idee_args_to_domain() -> None:

@@ -112,6 +112,30 @@ def test_create_suggestions_rejects_unknown_mode(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_create_suggestions_requires_days_in_batch_mode(client: TestClient) -> None:
+    response = client.post(
+        "/api/suggestions",
+        json={"mode": "batch", "items": [{"ingredient_name": "egg"}]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_suggestions_ignores_days_in_single_mode(client: TestClient) -> None:
+    _setup(client)
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run_ideas", return_value=_ideas_proposed()),
+    ):
+        response = client.post(
+            "/api/suggestions",
+            json={"mode": "single", "items": [{"ingredient_name": "egg"}]},
+        )
+
+    assert response.status_code == 200
+
+
 # --- IDEAS phase (setup + mocked loop — no live LLM call in tests) ---
 
 
@@ -124,7 +148,11 @@ def test_create_suggestions_returns_ideas_proposed_result(client: TestClient) ->
     ):
         response = client.post(
             "/api/suggestions",
-            json={"mode": "batch", "items": [{"ingredient_name": "carrot", "quantity_raw": "3"}]},
+            json={
+                "mode": "batch",
+                "days": 5,
+                "items": [{"ingredient_name": "carrot", "quantity_raw": "3"}],
+            },
         )
 
     assert response.status_code == 200
@@ -147,7 +175,9 @@ def test_create_suggestions_defaults_to_batch_mode(client: TestClient) -> None:
         patch("app.services.suggestion_service.is_model_available", return_value=True),
         patch("app.services.suggestion_service.loop.run_ideas", return_value=_ideas_proposed()),
     ):
-        response = client.post("/api/suggestions", json={"items": [{"ingredient_name": "egg"}]})
+        response = client.post(
+            "/api/suggestions", json={"days": 5, "items": [{"ingredient_name": "egg"}]}
+        )
 
     assert response.status_code == 200
 
@@ -160,7 +190,8 @@ def test_create_suggestions_returns_clarification_needed(client: TestClient) -> 
         patch("app.services.suggestion_service.loop.run_ideas", return_value=_clarification()),
     ):
         response = client.post(
-            "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
+            "/api/suggestions",
+            json={"mode": "batch", "days": 5, "items": [{"ingredient_name": "carrot"}]},
         )
 
     assert response.status_code == 200
@@ -180,7 +211,8 @@ def test_respond_resumes_ideas_phase_clarification(client: TestClient) -> None:
         patch("app.services.suggestion_service.loop.run_ideas", return_value=_clarification()),
     ):
         first = client.post(
-            "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
+            "/api/suggestions",
+            json={"mode": "batch", "days": 5, "items": [{"ingredient_name": "carrot"}]},
         )
     run_id = first.json()["run_id"]
 
@@ -213,7 +245,8 @@ def test_create_suggestions_requires_vault_unlocked(client: TestClient) -> None:
     client.post("/api/auth/lock")
 
     response = client.post(
-        "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
+        "/api/suggestions",
+        json={"mode": "batch", "days": 5, "items": [{"ingredient_name": "carrot"}]},
     )
 
     assert response.status_code == 423
@@ -223,7 +256,8 @@ def test_create_suggestions_requires_model_configured(client: TestClient) -> Non
     _setup(client, with_model=False)
 
     response = client.post(
-        "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
+        "/api/suggestions",
+        json={"mode": "batch", "days": 5, "items": [{"ingredient_name": "carrot"}]},
     )
 
     assert response.status_code == 409
@@ -239,7 +273,8 @@ def test_create_suggestions_returns_409_when_model_no_longer_available(
         patch("app.services.suggestion_service.loop.run_ideas") as mock_run_ideas,
     ):
         response = client.post(
-            "/api/suggestions", json={"mode": "batch", "items": [{"ingredient_name": "carrot"}]}
+            "/api/suggestions",
+            json={"mode": "batch", "days": 5, "items": [{"ingredient_name": "carrot"}]},
         )
 
     assert response.status_code == 409
@@ -257,7 +292,11 @@ def _propose_ideas(client: TestClient) -> str:
     ):
         response = client.post(
             "/api/suggestions",
-            json={"mode": "batch", "items": [{"ingredient_name": "carrot", "quantity_raw": "3"}]},
+            json={
+                "mode": "batch",
+                "days": 5,
+                "items": [{"ingredient_name": "carrot", "quantity_raw": "3"}],
+            },
         )
     return str(response.json()["run_id"])
 
@@ -365,6 +404,7 @@ def test_select_deducts_reported_stock_items_from_the_fridge(client: TestClient)
             "/api/suggestions",
             json={
                 "mode": "batch",
+                "days": 5,
                 "items": [
                     {
                         "ingredient_name": "carrot",
@@ -413,6 +453,7 @@ def test_select_does_not_deduct_stock_items_the_recipe_did_not_report_using(
             "/api/suggestions",
             json={
                 "mode": "batch",
+                "days": 5,
                 "items": [
                     {
                         "ingredient_name": "carrot",

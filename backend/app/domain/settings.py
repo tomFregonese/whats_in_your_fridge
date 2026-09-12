@@ -18,3 +18,10 @@ class Settings:
     openrouter_model_id: str | None
     created_at: datetime
     updated_at: datetime
+    freezer_capacity_slots: int | None = None
+    """Household freezer capacity, in number of dish portions (same unit
+    as `default_servings` sizes a dish) — `None` means unlimited, the
+    default until the user sets one, so no household sees a capacity
+    warning it never opted into. Consulted by
+    `services/meal_agenda_service.py::build_agenda` when deciding whether
+    a dish that would otherwise spoil can be frozen instead."""

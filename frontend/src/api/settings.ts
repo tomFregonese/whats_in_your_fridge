@@ -3,6 +3,7 @@ import { api } from "./client";
 export interface SettingsOut {
   default_servings: number;
   openrouter_model_id: string | null;
+  freezer_capacity_slots: number | null;
   openrouter_token_configured: boolean;
 }
 
@@ -20,10 +21,14 @@ export function getSettings(): Promise<SettingsOut> {
 export function updateSettings(
   defaultServings: number,
   openrouterModelId?: string,
+  freezerCapacitySlots?: number,
 ): Promise<SettingsOut> {
   return api.patch<SettingsOut>("/api/settings", {
     default_servings: defaultServings,
     ...(openrouterModelId !== undefined ? { openrouter_model_id: openrouterModelId } : {}),
+    ...(freezerCapacitySlots !== undefined
+      ? { freezer_capacity_slots: freezerCapacitySlots }
+      : {}),
   });
 }
 

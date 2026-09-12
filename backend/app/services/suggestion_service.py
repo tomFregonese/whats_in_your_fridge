@@ -29,11 +29,12 @@ from app.agent.catalog import is_model_available
 from app.agent.dedup import DedupProvider
 from app.domain.agent_run import AgentRun, AgentRunPhase, AgentRunStatus
 from app.domain.dish_idea import DishIdea
-from app.domain.fridge_input import FridgeInput
+from app.domain.fridge_input import FridgeInput, FridgeInputMode
 from app.domain.fridge_stock import FridgeStockItem
-from app.domain.suggestion import MealPlan, Suggestion
+from app.domain.suggestion import AgendaEntry, MealPlan, Suggestion
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
+from app.persistence.repositories.equipment_repository import EquipmentRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.preference_note_repository import PreferenceNoteRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
@@ -44,6 +45,7 @@ from app.services.exceptions import (
     NotFoundError,
 )
 from app.services.fridge_stock_service import FridgeStockService
+from app.services.meal_agenda_service import DishForAgenda, build_agenda
 from app.services.settings_service import SettingsService
 
 
@@ -67,6 +69,7 @@ class CompletedOutcome:
     suggestions: list[Suggestion]
     notes_generales: str | None
     removed_stock_items: list[FridgeStockItem] = field(default_factory=list)
+    agenda: list[AgendaEntry] = field(default_factory=list)
 
 
 SuggestionOutcome = ClarificationOutcome | IdeasOutcome | CompletedOutcome
@@ -79,6 +82,7 @@ class SuggestionService:
         agent_run_repository: AgentRunRepository,
         suggestion_repository: SuggestionRepository,
         allergy_repository: AllergyRepository,
+        equipment_repository: EquipmentRepository,
         preference_repository: PreferenceNoteRepository,
         settings_service: SettingsService,
         security_service: SecurityService,
@@ -89,6 +93,7 @@ class SuggestionService:
         self._agent_run_repository = agent_run_repository
         self._suggestion_repository = suggestion_repository
         self._allergy_repository = allergy_repository
+        self._equipment_repository = equipment_repository
         self._preference_repository = preference_repository
         self._settings_service = settings_service
         self._security_service = security_service
@@ -102,10 +107,12 @@ class SuggestionService:
         system_prompt = prompts.build_system_prompt(
             default_servings=self._settings_service.get_settings().default_servings,
             allergies=self._allergy_repository.list_all(),
+            equipment=self._equipment_repository.list_all(),
             preferences=self._preference_repository.list_all(),
             dedup_context=self._dedup_provider.get_exclusion_context(),
             phase=AgentRunPhase.IDEAS,
             mode=saved_input.mode,
+            days=fridge_input.days,
         )
         messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": system_prompt},
@@ -244,6 +251,7 @@ class SuggestionService:
             model=model,
             messages=messages,
             allergies=self._allergy_repository.list_all(),
+            equipment=self._equipment_repository.list_all(),
             selected_dish_names=selected_dish_names,
             known_stock_item_ids=known_stock_item_ids,
         )
@@ -306,11 +314,30 @@ class SuggestionService:
             self._fridge_stock_service.deduct(used_stock_ids) if used_stock_ids else []
         )
 
+        agenda: list[AgendaEntry] = []
+        if fridge_input.mode == FridgeInputMode.BATCH and fridge_input.days is not None:
+            freezer_capacity_slots = self._settings_service.get_settings().freezer_capacity_slots
+            built = build_agenda(
+                dishes=[
+                    DishForAgenda(
+                        suggestion_id=s.id,
+                        fridge_days=s.fridge_days,
+                        freezer_friendly=s.freezer_friendly,
+                    )
+                    for s in saved_meal_plan.suggestions
+                    if s.id is not None
+                ],
+                days=fridge_input.days,
+                freezer_capacity_slots=freezer_capacity_slots,
+            )
+            agenda = self._suggestion_repository.add_agenda(saved_meal_plan.id, built)
+
         return CompletedOutcome(
             meal_plan_id=saved_meal_plan.id,
             suggestions=saved_meal_plan.suggestions,
             removed_stock_items=removed_items,
             notes_generales=result.notes_generales,
+            agenda=agenda,
         )
 
     def _token_and_model(self) -> tuple[str, str]:

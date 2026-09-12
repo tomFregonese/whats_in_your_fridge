@@ -10,6 +10,7 @@ def _plat(*ingredient_names: str) -> PlatArgs:
         portions=4,
         ingredients=[PlatIngredient(nom=name) for name in ingredient_names],
         etapes=["step"],
+        fridge_days=3,
     )
 
 

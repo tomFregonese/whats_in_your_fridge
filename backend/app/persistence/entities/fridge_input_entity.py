@@ -14,6 +14,7 @@ class FridgeInputEntity(SQLModel, table=True):
     mode: str
     free_text: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    days: int | None = None
 
     def to_domain(self) -> FridgeInput:
         """Maps this row only — `items` stays empty here, populated by the
@@ -24,6 +25,7 @@ class FridgeInputEntity(SQLModel, table=True):
             mode=FridgeInputMode(self.mode),
             free_text=self.free_text,
             created_at=self.created_at,
+            days=self.days,
         )
 
     @classmethod
@@ -33,6 +35,7 @@ class FridgeInputEntity(SQLModel, table=True):
             mode=fridge_input.mode.value,
             free_text=fridge_input.free_text,
             created_at=fridge_input.created_at,
+            days=fridge_input.days,
         )
 
 

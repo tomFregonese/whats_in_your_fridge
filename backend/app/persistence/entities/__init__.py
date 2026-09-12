@@ -13,6 +13,7 @@ app.persistence.entities` registers the full schema on `SQLModel.metadata`
 
 from app.persistence.entities.agent_run_entity import AgentRunEntity
 from app.persistence.entities.allergy_entity import AllergyEntity
+from app.persistence.entities.equipment_entity import EquipmentEntity
 from app.persistence.entities.feedback_entity import FeedbackEntity
 from app.persistence.entities.fridge_input_entity import (
     FridgeInputEntity,
@@ -22,12 +23,18 @@ from app.persistence.entities.fridge_stock_item_entity import FridgeStockItemEnt
 from app.persistence.entities.merge_dismissal_entity import MergeDismissalEntity
 from app.persistence.entities.preference_note_entity import PreferenceNoteEntity
 from app.persistence.entities.settings_entity import SettingsEntity
-from app.persistence.entities.suggestion_entity import MealPlanEntity, SuggestionEntity
+from app.persistence.entities.suggestion_entity import (
+    AgendaEntryEntity,
+    MealPlanEntity,
+    SuggestionEntity,
+)
 from app.persistence.entities.vault_entity import VaultEntity
 
 __all__ = [
+    "AgendaEntryEntity",
     "AgentRunEntity",
     "AllergyEntity",
+    "EquipmentEntity",
     "FeedbackEntity",
     "FridgeInputEntity",
     "FridgeInputItemEntity",

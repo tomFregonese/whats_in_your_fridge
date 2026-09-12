@@ -13,6 +13,7 @@ from app.config import settings as app_settings
 from app.db import get_session
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
+from app.persistence.repositories.equipment_repository import EquipmentRepository
 from app.persistence.repositories.feedback_repository import FeedbackRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.fridge_stock_repository import FridgeStockRepository
@@ -22,6 +23,7 @@ from app.persistence.repositories.settings_repository import SettingsRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
 from app.services.allergy_service import AllergyService
+from app.services.equipment_service import EquipmentService
 from app.services.feedback_service import FeedbackService
 from app.services.fridge_stock_service import FridgeStockService
 from app.services.meal_plan_service import MealPlanService
@@ -55,6 +57,16 @@ def get_allergy_service(
     repository: AllergyRepository = Depends(get_allergy_repository),
 ) -> AllergyService:
     return AllergyService(repository)
+
+
+def get_equipment_repository(session: Session = Depends(get_session)) -> EquipmentRepository:
+    return EquipmentRepository(session)
+
+
+def get_equipment_service(
+    repository: EquipmentRepository = Depends(get_equipment_repository),
+) -> EquipmentService:
+    return EquipmentService(repository)
 
 
 def get_preference_service(
@@ -119,6 +131,7 @@ def get_suggestion_service(
     agent_run_repository: AgentRunRepository = Depends(get_agent_run_repository),
     suggestion_repository: SuggestionRepository = Depends(get_suggestion_repository),
     allergy_repository: AllergyRepository = Depends(get_allergy_repository),
+    equipment_repository: EquipmentRepository = Depends(get_equipment_repository),
     preference_repository: PreferenceNoteRepository = Depends(get_preference_repository),
     settings_service: SettingsService = Depends(get_settings_service),
     security_service: SecurityService = Depends(get_security_service),
@@ -130,6 +143,7 @@ def get_suggestion_service(
         agent_run_repository,
         suggestion_repository,
         allergy_repository,
+        equipment_repository,
         preference_repository,
         settings_service,
         security_service,

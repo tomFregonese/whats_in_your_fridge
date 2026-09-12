@@ -8,17 +8,45 @@ export interface FridgeInputItemPayload {
 
 export interface FridgeInputPayload {
   mode: "batch" | "single";
+  /** Required by the backend when `mode === "batch"` — how many days this
+   * batch-cooking session should cover, sizing the idea shortlist and
+   * later the agenda (see `MealAgenda`). Ignored in `single` mode. */
+  days?: number;
   free_text?: string;
   items: FridgeInputItemPayload[];
+}
+
+export interface Ingredient {
+  name: string;
+  quantity: string | null;
+  /** Not in the fridge/pantry — needs to be bought (see the shopping
+   * list, aggregated across a plan's dishes by `ShoppingList`). */
+  to_buy: boolean;
 }
 
 export interface Suggestion {
   id: number;
   dish_name: string;
   description: string;
-  ingredients: string[];
+  ingredients: Ingredient[];
   steps: string[];
   servings: number;
+  /** Estimated days this dish keeps refrigerated after cooking. */
+  fridge_days: number;
+  freezer_friendly: boolean;
+}
+
+/** One day of a batch-cooking agenda (see `MealAgenda`) — which dish is
+ * eaten on `day_index` (0 = the day the batch is cooked) and how it needs
+ * to be stored to get there. Persisted, so present both right after
+ * generation and on later `GET /api/meal-plans/{id}` reads — unlike
+ * `notes_generales`/`removed_stock_items`. Only populated for a batch
+ * plan generated with a `days` count. */
+export interface AgendaEntry {
+  day_index: number;
+  suggestion_id: number;
+  storage: "fresh" | "frozen" | "at_risk";
+  warning: string | null;
 }
 
 /** One fridge stock item automatically removed once a meal plan completes
@@ -51,6 +79,7 @@ export interface SuggestionsResult {
   ideas: DishIdea[];
   notes_generales: string | null;
   removed_stock_items: RemovedStockItem[];
+  agenda: AgendaEntry[];
   run_id: number | null;
   question: string | null;
   options: string[] | null;

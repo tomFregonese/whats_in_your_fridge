@@ -9,17 +9,11 @@ like a generic "oil" ingredient against an "olive oil" allergy, which
 isn't what a strict exclusion list means.
 """
 
-import unicodedata
 from dataclasses import dataclass
 
 from app.agent.output_schema import PlatArgs
+from app.agent.text_normalize import normalize
 from app.domain.allergy import Allergy
-
-
-def _normalize(text: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", text)
-    without_accents = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return without_accents.casefold().strip()
 
 
 def find_violation(plat: PlatArgs, allergies: list[Allergy]) -> str | None:
@@ -28,9 +22,9 @@ def find_violation(plat: PlatArgs, allergies: list[Allergy]) -> str | None:
     reported as violating once even if it breaks several allergies — one
     is enough to exclude it.
     """
-    ingredient_names = [_normalize(ingredient.nom) for ingredient in plat.ingredients]
+    ingredient_names = [normalize(ingredient.nom) for ingredient in plat.ingredients]
     for allergy in allergies:
-        allergen = _normalize(allergy.ingredient_name)
+        allergen = normalize(allergy.ingredient_name)
         if not allergen:
             continue
         if any(allergen in name for name in ingredient_names):

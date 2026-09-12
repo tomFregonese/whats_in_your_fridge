@@ -16,19 +16,29 @@ system prompt.
 
 from app.domain.agent_run import AgentRunPhase
 from app.domain.allergy import Allergy
+from app.domain.equipment import Equipment
 from app.domain.fridge_input import FridgeInput, FridgeInputItem, FridgeInputMode
 from app.domain.preference_note import PreferenceNote
 
 PANTRY_STAPLES = "salt, pepper, cooking oil, water"
+
+# Always assumed available, on the same footing as `PANTRY_STAPLES` — the
+# household's `equipment` list (see `app.domain.equipment.Equipment`) only
+# needs to cover appliances beyond this (oven, microwave, blender, ...),
+# never this baseline. Kept in sync with `agent/equipment_check.py`'s
+# docstring.
+BASE_EQUIPMENT = "a stovetop/hob, pots and pans, knives, a cutting board, mixing bowls"
 
 
 def build_system_prompt(
     *,
     default_servings: int,
     allergies: list[Allergy],
+    equipment: list[Equipment],
     preferences: list[PreferenceNote],
     phase: AgentRunPhase,
     mode: FridgeInputMode | None = None,
+    days: int | None = None,
     dedup_context: str = "",
 ) -> str:
     if phase == AgentRunPhase.IDEAS and mode is None:
@@ -36,10 +46,29 @@ def build_system_prompt(
 
     lines = [
         "You are a batch-cooking assistant for a self-hosted household app. "
-        "Suggest dishes to cook from what's in the fridge.",
+        "Suggest dishes to cook primarily from what's in the fridge — a few ingredients "
+        "the household doesn't have are fine as long as they're clearly flagged (see "
+        "`a_acheter` below) so they end up on a shopping list, rather than silently "
+        "assumed available.",
         f"Default number of servings, unless the user says otherwise: {default_servings}.",
         f"Assume these pantry staples are always available: {PANTRY_STAPLES}.",
+        f"Assume this equipment is always available: {BASE_EQUIPMENT}.",
     ]
+
+    if equipment:
+        names = ", ".join(item.name for item in equipment)
+        lines.append(
+            "Additional equipment available at this household: "
+            f"{names}. Only propose dishes that can be fully cooked with this equipment "
+            "plus the baseline above — never assume an oven, microwave, blender, or any "
+            "other appliance that isn't listed here."
+        )
+    else:
+        lines.append(
+            "No additional equipment beyond the baseline above is available at this "
+            "household — do not propose dishes needing an oven, microwave, blender, or "
+            "any other appliance."
+        )
 
     if allergies:
         names = ", ".join(allergy.ingredient_name for allergy in allergies)
@@ -59,11 +88,20 @@ def build_system_prompt(
         assert mode is not None  # noqa: S101 — guarded above; narrows for mypy
         lines.append(
             "Every final answer must go through the `proposer_idees` tool: propose "
-            f"{_idea_count_hint(mode)}. Give only a name and a one-line description for "
-            "each — never ingredients or steps at this stage, those come later once the "
-            "user has picked. If the fridge contents or the request are ambiguous, call "
-            "`demander_precision` instead of guessing — never answer with plain text."
+            f"{_idea_count_hint(mode, days)}. Give only a name and a one-line description "
+            "for each — never ingredients or steps at this stage, those come later once "
+            "the user has picked. If the fridge contents or the request are ambiguous, "
+            "call `demander_precision` instead of guessing — never answer with plain text."
         )
+        if mode == FridgeInputMode.BATCH and days is not None and days > 1:
+            lines.append(
+                "This is a batch-cooking session for "
+                f"{days} day(s): favor ideas that reuse one cooking effort across several "
+                "presentations over the following days, e.g. a big pot of pasta eaten hot "
+                "the same evening, as a cold pasta salad the next day, then as a pasta "
+                "gratin the day after — mention this kind of reuse explicitly in the "
+                "description when it applies."
+            )
     else:
         lines.append(
             "Every final answer must go through the `proposer_plats` tool: generate the "
@@ -80,12 +118,26 @@ def build_system_prompt(
             "from stock automatically. Leave it empty if none apply, and never invent an ID "
             "that wasn't given to you."
         )
+        lines.append(
+            "For each dish, also set: `equipment_used` (any appliance beyond the baseline "
+            "it actually needs — leave empty if it only needs the baseline), `fridge_days` "
+            "(your best estimate of how many days it safely keeps refrigerated after "
+            "cooking), and `freezer_friendly` (whether it freezes well). For each "
+            "ingredient, set `a_acheter` to true if it's not in the fridge contents or the "
+            "pantry staples and the household would need to buy it."
+        )
 
     return "\n".join(lines)
 
 
-def _idea_count_hint(mode: FridgeInputMode) -> str:
+def _idea_count_hint(mode: FridgeInputMode, days: int | None) -> str:
     if mode == FridgeInputMode.BATCH:
+        if days is not None:
+            return (
+                f"enough distinct dish ideas to cover {days} day(s) of batch cooking "
+                "(fewer than that is fine when some ideas are meant to be eaten as "
+                "leftovers across several of those days)"
+            )
         return "6 to 8 distinct dish ideas, enough variety for a week of batch cooking"
     return "3 to 4 distinct dish ideas for a single meal"
 

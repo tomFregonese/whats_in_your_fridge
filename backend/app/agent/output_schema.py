@@ -27,6 +27,13 @@ class DemanderPrecisionArgs(BaseModel):
 class PlatIngredient(BaseModel):
     nom: str = Field(min_length=1)
     quantite: str | None = None
+    a_acheter: bool = Field(
+        default=False,
+        description=(
+            "Whether this ingredient is NOT in the fridge/pantry staples and needs to be "
+            "bought — a dish may use a handful of these as long as they're flagged."
+        ),
+    )
 
 
 class PlatArgs(BaseModel):
@@ -42,6 +49,23 @@ class PlatArgs(BaseModel):
             "fridge stock items this dish actually used."
         ),
     )
+    equipment_used: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Kitchen equipment (beyond a stovetop, pots/pans, knives and basic utensils, "
+            "always assumed) this dish actually needs — e.g. 'oven', 'blender'. Never "
+            "invent equipment the household hasn't listed as available."
+        ),
+    )
+    fridge_days: int = Field(
+        gt=0,
+        description=(
+            "Estimated number of days this dish safely keeps refrigerated after cooking."
+        ),
+    )
+    freezer_friendly: bool = Field(
+        default=False, description="Whether this dish freezes well for later."
+    )
 
     def to_domain(
         self, *, allergy_check_status: AllergyCheckStatus = AllergyCheckStatus.OK
@@ -54,21 +78,26 @@ class PlatArgs(BaseModel):
         (or is corrected past) that check. `ingredients_stock_ids` is
         expected to have already been sanitized against the known stock ids
         for this run (see `agent/stock_reference_check.py`) by the time this
-        runs, so it's trusted as-is here.
+        runs, so it's trusted as-is here. `fridge_days` is expected to have
+        already been clamped to a sane range (see
+        `agent/conservation_sanity_check.py`) by the time this runs.
         """
-        ingredient_strings = [
-            f"{i.nom} ({i.quantite})" if i.quantite else i.nom for i in self.ingredients
+        ingredients = [
+            {"nom": i.nom, "quantite": i.quantite, "a_acheter": i.a_acheter}
+            for i in self.ingredients
         ]
         return Suggestion(
             id=None,
             meal_plan_id=None,
             dish_name=self.nom,
             description=self.description,
-            ingredients_json=json.dumps(ingredient_strings),
+            ingredients_json=json.dumps(ingredients),
             steps_json=json.dumps(self.etapes),
             servings=self.portions,
             allergy_check_status=allergy_check_status,
             used_stock_item_ids_json=json.dumps(self.ingredients_stock_ids),
+            fridge_days=self.fridge_days,
+            freezer_friendly=self.freezer_friendly,
         )
 
 

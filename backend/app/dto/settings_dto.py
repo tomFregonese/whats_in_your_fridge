@@ -19,6 +19,11 @@ class SettingsDtoIn(BaseModel):
 
     default_servings: int = Field(gt=0)
     openrouter_model_id: str | None = None
+    freezer_capacity_slots: int | None = Field(default=None, gt=0)
+    """`None` means "leave the current value unchanged" — same convention
+    as `openrouter_model_id`. There's no separate way to explicitly clear
+    it back to unlimited in V1 (a documented limitation, same shape as
+    that field)."""
 
     def to_domain(self, current: Settings) -> Settings:
         return Settings(
@@ -31,12 +36,18 @@ class SettingsDtoIn(BaseModel):
             ),
             created_at=current.created_at,
             updated_at=current.updated_at,
+            freezer_capacity_slots=(
+                self.freezer_capacity_slots
+                if self.freezer_capacity_slots is not None
+                else current.freezer_capacity_slots
+            ),
         )
 
 
 class SettingsDtoOut(BaseModel):
     default_servings: int
     openrouter_model_id: str | None
+    freezer_capacity_slots: int | None
     # Sourced from `security.has_token()`, not the `Settings` BO — a Dto
     # can aggregate more than one BO, same as `SuggestionDtoOut` will later
     # include `feedback` (see the project plan).
@@ -47,5 +58,6 @@ class SettingsDtoOut(BaseModel):
         return cls(
             default_servings=settings.default_servings,
             openrouter_model_id=settings.openrouter_model_id,
+            freezer_capacity_slots=settings.freezer_capacity_slots,
             openrouter_token_configured=token_configured,
         )

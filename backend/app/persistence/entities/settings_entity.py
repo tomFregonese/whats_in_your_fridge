@@ -19,6 +19,7 @@ class SettingsEntity(SQLModel, table=True):
     openrouter_model_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    freezer_capacity_slots: int | None = None
 
     def to_domain(self) -> Settings:
         return Settings(
@@ -27,6 +28,7 @@ class SettingsEntity(SQLModel, table=True):
             openrouter_model_id=self.openrouter_model_id,
             created_at=self.created_at,
             updated_at=self.updated_at,
+            freezer_capacity_slots=self.freezer_capacity_slots,
         )
 
     @classmethod
@@ -37,4 +39,5 @@ class SettingsEntity(SQLModel, table=True):
             openrouter_model_id=settings.openrouter_model_id,
             created_at=settings.created_at,
             updated_at=settings.updated_at,
+            freezer_capacity_slots=settings.freezer_capacity_slots,
         )

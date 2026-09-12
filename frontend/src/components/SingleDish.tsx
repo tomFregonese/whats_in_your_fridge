@@ -1,5 +1,6 @@
 import type { Suggestion } from "../api/suggestions";
 import { DishCard } from "./DishCard";
+import { ShoppingList } from "./ShoppingList";
 
 interface SingleDishProps {
   suggestions: Suggestion[];
@@ -15,6 +16,8 @@ export function SingleDish({ suggestions, notesGenerales }: SingleDishProps) {
         <h1>Here's what to cook</h1>
         {notesGenerales && <p className="plan-notes">{notesGenerales}</p>}
       </div>
+
+      <ShoppingList suggestions={suggestions} />
 
       {suggestions.map((dish) => (
         <DishCard dish={dish} key={dish.dish_name} />

@@ -48,3 +48,11 @@ class FridgeInput:
     free_text: str | None
     created_at: datetime
     items: list[FridgeInputItem] = field(default_factory=list)
+    days: int | None = None
+    """Number of days this batch-cooking session should cover — only
+    meaningful when `mode == BATCH` (see `dto/fridge_input_dto.py`'s
+    validation). Sizes the `IDEAS`-phase shortlist (see `agent/prompts.py`)
+    and, once the recipes are generated, feeds
+    `services/meal_agenda_service.py`'s day assignment. `None` for a
+    single-dish submission, or an older batch submission that predates
+    this field."""

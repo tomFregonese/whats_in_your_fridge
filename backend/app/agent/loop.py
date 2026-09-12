@@ -39,7 +39,13 @@ from openai.types.chat import (
 )
 from pydantic import ValidationError
 
-from app.agent import allergy_check, client, stock_reference_check
+from app.agent import (
+    allergy_check,
+    client,
+    conservation_sanity_check,
+    equipment_check,
+    stock_reference_check,
+)
 from app.agent.output_schema import (
     DemanderPrecisionArgs,
     PlatArgs,
@@ -50,6 +56,7 @@ from app.agent.tools import DEMANDER_PRECISION, PROPOSER_IDEES, PROPOSER_PLATS, 
 from app.domain.agent_run import AgentRunPhase
 from app.domain.allergy import Allergy
 from app.domain.dish_idea import DishIdea
+from app.domain.equipment import Equipment
 from app.domain.suggestion import AllergyCheckStatus, Suggestion
 from app.services.exceptions import AgentResponseInvalidError
 
@@ -95,6 +102,7 @@ def run(
     model: str,
     messages: list[ChatCompletionMessageParam],
     allergies: list[Allergy],
+    equipment: list[Equipment],
     selected_dish_names: list[str],
     known_stock_item_ids: AbstractSet[int] = frozenset(),
 ) -> LoopResult:
@@ -158,14 +166,20 @@ def run(
             # labeled REGENERATED, not OK.
             status = AllergyCheckStatus.OK if attempt == 0 else AllergyCheckStatus.REGENERATED
 
-            safe_plats, violations = allergy_check.check_all(plats_args.plats, allergies)
+            allergy_safe, allergy_violations = allergy_check.check_all(
+                plats_args.plats, allergies
+            )
+            safe_plats, equipment_violations = equipment_check.check_all(allergy_safe, equipment)
             stock_reference_check.sanitize_stock_ids(safe_plats, known_stock_item_ids)
+            conservation_sanity_check.sanitize_fridge_days(safe_plats)
 
-            if violations:
+            if allergy_violations or equipment_violations:
                 if last_attempt:
                     # Out of attempts — resolve now rather than erroring
                     # out: keep whatever's safe, drop the rest, and say so.
-                    dropped_names = [violation.plat.nom for violation in violations]
+                    dropped_names = [v.plat.nom for v in allergy_violations] + [
+                        v.plat.nom for v in equipment_violations
+                    ]
                     note = _dropped_note(plats_args.notes_generales, dropped_names)
                     return PlatsProposed(
                         suggestions=[
@@ -175,7 +189,10 @@ def run(
                         notes_generales=note,
                     )
                 working_messages.append(
-                    _tool_error_message(tool_call.id, _violation_message(violations))
+                    _tool_error_message(
+                        tool_call.id,
+                        _combined_violation_message(allergy_violations, equipment_violations),
+                    )
                 )
                 continue
 
@@ -283,6 +300,7 @@ def stream_run(
     model: str,
     messages: list[ChatCompletionMessageParam],
     allergies: list[Allergy],
+    equipment: list[Equipment],
     selected_dish_names: list[str],
     reasoning_callback: Callable[[str], None],
     known_stock_item_ids: AbstractSet[int] = frozenset(),
@@ -345,12 +363,18 @@ def stream_run(
             last_attempt = attempt == MAX_ATTEMPTS - 1
             status = AllergyCheckStatus.OK if attempt == 0 else AllergyCheckStatus.REGENERATED
 
-            safe_plats, violations = allergy_check.check_all(plats_args.plats, allergies)
+            allergy_safe, allergy_violations = allergy_check.check_all(
+                plats_args.plats, allergies
+            )
+            safe_plats, equipment_violations = equipment_check.check_all(allergy_safe, equipment)
             stock_reference_check.sanitize_stock_ids(safe_plats, known_stock_item_ids)
+            conservation_sanity_check.sanitize_fridge_days(safe_plats)
 
-            if violations:
+            if allergy_violations or equipment_violations:
                 if last_attempt:
-                    dropped_names = [violation.plat.nom for violation in violations]
+                    dropped_names = [v.plat.nom for v in allergy_violations] + [
+                        v.plat.nom for v in equipment_violations
+                    ]
                     note = _dropped_note(plats_args.notes_generales, dropped_names)
                     return PlatsProposed(
                         suggestions=[
@@ -360,7 +384,10 @@ def stream_run(
                         notes_generales=note,
                     )
                 working_messages.append(
-                    _tool_error_message(tool_call.get("id", ""), _violation_message(violations))
+                    _tool_error_message(
+                        tool_call.get("id", ""),
+                        _combined_violation_message(allergy_violations, equipment_violations),
+                    )
                 )
                 continue
 
@@ -481,12 +508,20 @@ def _to_tool_call_param_stream(
     }
 
 
-def _violation_message(violations: list[allergy_check.Violation]) -> str:
-    details = "; ".join(f'"{v.plat.nom}" contains {v.allergen}' for v in violations)
+def _combined_violation_message(
+    allergy_violations: list[allergy_check.Violation],
+    equipment_violations: list[equipment_check.Violation],
+) -> str:
+    parts = []
+    if allergy_violations:
+        details = "; ".join(f'"{v.plat.nom}" contains {v.allergen}' for v in allergy_violations)
+        parts.append(f"violate a strict household allergy ({details})")
+    if equipment_violations:
+        details = "; ".join(f'"{v.plat.nom}" needs {v.equipment}' for v in equipment_violations)
+        parts.append(f"need equipment the household doesn't have ({details})")
     return (
-        f"The following dish(es) violate a strict household allergy and cannot be shown: "
-        f"{details}. Call `proposer_plats` again with corrected dishes that avoid every "
-        "listed allergy entirely."
+        f"The following dish(es) cannot be shown because they {' and/or '.join(parts)}. Call "
+        "`proposer_plats` again with corrected dishes that fix every issue listed."
     )
 
 

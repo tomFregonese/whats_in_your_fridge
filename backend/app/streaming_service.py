@@ -37,15 +37,17 @@ from app.agent.loop import IdeasLoopResult, LoopResult
 from app.domain.agent_run import AgentRun, AgentRunPhase, AgentRunStatus
 from app.domain.allergy import Allergy
 from app.domain.dish_idea import DishIdea
-from app.domain.fridge_input import FridgeInput
+from app.domain.equipment import Equipment
+from app.domain.fridge_input import FridgeInput, FridgeInputMode
 from app.domain.fridge_stock import FridgeStockItem
-from app.domain.suggestion import MealPlan
+from app.domain.suggestion import AgendaEntry, MealPlan
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.fridge_input_repository import FridgeInputRepository
 from app.persistence.repositories.suggestion_repository import SuggestionRepository
 from app.security.service import SecurityService
 from app.services.exceptions import NotFoundError
 from app.services.fridge_stock_service import FridgeStockService
+from app.services.meal_agenda_service import DishForAgenda, build_agenda
 from app.services.settings_service import SettingsService
 
 # Per-run in-memory state — keyed by the streaming run id.
@@ -96,6 +98,19 @@ def _stock_item_to_dict(item: FridgeStockItem) -> dict[str, object]:
     }
 
 
+def _agenda_entry_to_dict(entry: AgendaEntry) -> dict[str, object]:
+    """Shapes an `AgendaEntry` for the `"completed"` SSE event — same
+    plain-dict convention as `_stock_item_to_dict`; mirrors
+    `AgendaEntryDtoOut`'s fields on the non-streaming response."""
+    return {
+        "id": entry.id,
+        "day_index": entry.day_index,
+        "suggestion_id": entry.suggestion_id,
+        "storage": entry.storage.value,
+        "warning": entry.warning,
+    }
+
+
 def _stream_run_ideas(
     *, run_id: int, token: str, model: str, messages: list[ChatCompletionMessageParam]
 ) -> IdeasLoopResult:
@@ -114,6 +129,7 @@ def _stream_run_recipes(
     model: str,
     messages: list[ChatCompletionMessageParam],
     allergies: list[Allergy],
+    equipment: list[Equipment],
     selected_dish_names: list[str],
     known_stock_item_ids: set[int],
 ) -> LoopResult:
@@ -122,6 +138,7 @@ def _stream_run_recipes(
         model=model,
         messages=messages,
         allergies=allergies,
+        equipment=equipment,
         selected_dish_names=selected_dish_names,
         known_stock_item_ids=known_stock_item_ids,
         reasoning_callback=lambda text: _event(run_id, {"type": "reasoning", "content": text}),
@@ -136,6 +153,7 @@ def start_background(
     token: str,
     model: str,
     allergies: list[Allergy],
+    equipment: list[Equipment],
     fridge_input_repository: FridgeInputRepository,
     agent_run_repository: AgentRunRepository,
     suggestion_repository: SuggestionRepository,
@@ -186,6 +204,7 @@ def start_background(
                         model=model,
                         messages=current_messages,
                         allergies=allergies,
+                        equipment=equipment,
                         selected_dish_names=selected_dish_names,
                         known_stock_item_ids=known_stock_item_ids,
                     )
@@ -315,12 +334,32 @@ def start_background(
                     fridge_stock_service.deduct(used_stock_ids) if used_stock_ids else []
                 )
 
+                agenda: list[AgendaEntry] = []
+                assert saved_meal_plan.id is not None
+                if fridge_input.mode == FridgeInputMode.BATCH and fridge_input.days is not None:
+                    freezer_capacity_slots = settings_service.get_settings().freezer_capacity_slots
+                    built = build_agenda(
+                        dishes=[
+                            DishForAgenda(
+                                suggestion_id=s.id,
+                                fridge_days=s.fridge_days,
+                                freezer_friendly=s.freezer_friendly,
+                            )
+                            for s in saved_meal_plan.suggestions
+                            if s.id is not None
+                        ],
+                        days=fridge_input.days,
+                        freezer_capacity_slots=freezer_capacity_slots,
+                    )
+                    agenda = suggestion_repository.add_agenda(saved_meal_plan.id, built)
+
                 _event(
                     run_id,
                     {
                         "type": "completed",
                         "meal_plan_id": saved_meal_plan.id,
                         "notes_generales": phase_result.notes_generales,
+                        "agenda": [_agenda_entry_to_dict(entry) for entry in agenda],
                         "removed_stock_items": [
                             _stock_item_to_dict(item) for item in removed_items
                         ],

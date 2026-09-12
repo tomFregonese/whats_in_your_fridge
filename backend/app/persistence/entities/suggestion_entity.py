@@ -5,7 +5,13 @@ from datetime import UTC, datetime
 from sqlmodel import Field, SQLModel
 
 from app.domain.fridge_input import FridgeInputMode
-from app.domain.suggestion import AllergyCheckStatus, MealPlan, Suggestion
+from app.domain.suggestion import (
+    AgendaEntry,
+    AgendaStorage,
+    AllergyCheckStatus,
+    MealPlan,
+    Suggestion,
+)
 
 
 class MealPlanEntity(SQLModel, table=True):
@@ -49,6 +55,8 @@ class SuggestionEntity(SQLModel, table=True):
     servings: int
     allergy_check_status: str
     used_stock_item_ids_json: str = "[]"
+    fridge_days: int = 3
+    freezer_friendly: bool = False
 
     def to_domain(self) -> Suggestion:
         return Suggestion(
@@ -61,6 +69,8 @@ class SuggestionEntity(SQLModel, table=True):
             servings=self.servings,
             allergy_check_status=AllergyCheckStatus(self.allergy_check_status),
             used_stock_item_ids_json=self.used_stock_item_ids_json,
+            fridge_days=self.fridge_days,
+            freezer_friendly=self.freezer_friendly,
         )
 
     @classmethod
@@ -77,4 +87,40 @@ class SuggestionEntity(SQLModel, table=True):
             servings=suggestion.servings,
             allergy_check_status=suggestion.allergy_check_status.value,
             used_stock_item_ids_json=suggestion.used_stock_item_ids_json,
+            fridge_days=suggestion.fridge_days,
+            freezer_friendly=suggestion.freezer_friendly,
+        )
+
+
+class AgendaEntryEntity(SQLModel, table=True):
+    __tablename__ = "meal_plan_agenda_entry"
+
+    id: int | None = Field(default=None, primary_key=True)
+    meal_plan_id: int = Field(foreign_key="meal_plan.id", index=True)
+    day_index: int
+    suggestion_id: int = Field(foreign_key="suggestion.id")
+    storage: str
+    warning: str | None = None
+
+    def to_domain(self) -> AgendaEntry:
+        return AgendaEntry(
+            id=self.id,
+            meal_plan_id=self.meal_plan_id,
+            day_index=self.day_index,
+            suggestion_id=self.suggestion_id,
+            storage=AgendaStorage(self.storage),
+            warning=self.warning,
+        )
+
+    @classmethod
+    def from_domain(cls, entry: AgendaEntry) -> AgendaEntryEntity:
+        if entry.meal_plan_id is None:
+            raise ValueError("AgendaEntry.meal_plan_id must be set before persisting")
+        return cls(
+            id=entry.id,
+            meal_plan_id=entry.meal_plan_id,
+            day_index=entry.day_index,
+            suggestion_id=entry.suggestion_id,
+            storage=entry.storage.value,
+            warning=entry.warning,
         )

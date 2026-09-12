@@ -57,6 +57,7 @@ def _start(session: Session, *, mode: FridgeInputMode = FridgeInputMode.BATCH) -
         token="tok",
         model="m",
         allergies=[],
+        equipment=[],
         fridge_input_repository=fridge_input_repository,
         agent_run_repository=AgentRunRepository(session),
         suggestion_repository=SuggestionRepository(session),

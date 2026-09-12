@@ -5,6 +5,7 @@ import type { MealPlan } from "../api/mealPlans";
 import { getMealPlan } from "../api/mealPlans";
 import type { RemovedStockItem } from "../api/suggestions";
 import { AppLayout } from "../components/AppLayout";
+import { MealAgenda } from "../components/MealAgenda";
 import { SingleDish } from "../components/SingleDish";
 import { WeekPlan } from "../components/WeekPlan";
 
@@ -104,6 +105,10 @@ export function MealPlanPage() {
             ))}
           </ul>
         </div>
+      )}
+
+      {mealPlan.agenda.length > 0 && (
+        <MealAgenda agenda={mealPlan.agenda} suggestions={mealPlan.suggestions} />
       )}
 
       {mealPlan.mode === "single" ? (

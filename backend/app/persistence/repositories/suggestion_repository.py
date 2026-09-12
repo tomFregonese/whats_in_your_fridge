@@ -3,8 +3,12 @@ from dataclasses import replace
 from sqlalchemy import ColumnElement, desc
 from sqlmodel import Session, select
 
-from app.domain.suggestion import MealPlan, Suggestion
-from app.persistence.entities.suggestion_entity import MealPlanEntity, SuggestionEntity
+from app.domain.suggestion import AgendaEntry, MealPlan, Suggestion
+from app.persistence.entities.suggestion_entity import (
+    AgendaEntryEntity,
+    MealPlanEntity,
+    SuggestionEntity,
+)
 
 
 class SuggestionRepository:
@@ -47,12 +51,32 @@ class SuggestionRepository:
         result.suggestions = [s.to_domain() for s in suggestion_entities]
         return result
 
+    def add_agenda(self, meal_plan_id: int, entries: list[AgendaEntry]) -> list[AgendaEntry]:
+        """Persists a batch-cooking agenda against an already-persisted
+        `MealPlan`/`Suggestion` aggregate — called by `SuggestionService`
+        once `add()` has assigned real suggestion ids, since
+        `services/meal_agenda_service.py::build_agenda` needs those ids as
+        input. A no-op (returns `[]`) for `entries=[]`, the common case of
+        single-dish plans or a batch plan generated without a `days` count.
+        """
+        entities = [
+            AgendaEntryEntity.from_domain(replace(entry, meal_plan_id=meal_plan_id))
+            for entry in entries
+        ]
+        for entity in entities:
+            self._session.add(entity)
+        self._session.commit()
+        for entity in entities:
+            self._session.refresh(entity)
+        return [entity.to_domain() for entity in entities]
+
     def get(self, meal_plan_id: int) -> MealPlan | None:
         entity = self._session.get(MealPlanEntity, meal_plan_id)
         if entity is None:
             return None
         result = entity.to_domain()
         result.suggestions = self._load_suggestions(meal_plan_id)
+        result.agenda = self._load_agenda(meal_plan_id)
         return result
 
     def get_suggestion(self, suggestion_id: int) -> Suggestion | None:
@@ -75,6 +99,7 @@ class SuggestionRepository:
             assert entity.id is not None
             meal_plan = entity.to_domain()
             meal_plan.suggestions = self._load_suggestions(entity.id)
+            meal_plan.agenda = self._load_agenda(entity.id)
             results.append(meal_plan)
         return results
 
@@ -83,6 +108,17 @@ class SuggestionRepository:
             SuggestionEntity.meal_plan_id == meal_plan_id  # type: ignore[assignment]
         )
         entities = self._session.exec(select(SuggestionEntity).where(condition)).all()
+        return [entity.to_domain() for entity in entities]
+
+    def _load_agenda(self, meal_plan_id: int) -> list[AgendaEntry]:
+        condition: ColumnElement[bool] = (
+            AgendaEntryEntity.meal_plan_id == meal_plan_id  # type: ignore[assignment]
+        )
+        # Same class-level field access typing gap as `condition` above.
+        order: ColumnElement[int] = AgendaEntryEntity.day_index  # type: ignore[assignment]
+        entities = self._session.exec(
+            select(AgendaEntryEntity).where(condition).order_by(order)
+        ).all()
         return [entity.to_domain() for entity in entities]
 
     def list_recent_dish_names(self, limit: int) -> list[str]:

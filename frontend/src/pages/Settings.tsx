@@ -3,35 +3,51 @@ import type { FormEvent } from "react";
 import type { Allergy } from "../api/allergies";
 import { addAllergy, deleteAllergy, listAllergies } from "../api/allergies";
 import { setToken as saveToken } from "../api/auth";
+import type { Equipment } from "../api/equipment";
+import { addEquipment, deleteEquipment, listEquipment } from "../api/equipment";
 import type { PreferenceNote } from "../api/preferences";
 import { addPreference, deletePreference, listPreferences } from "../api/preferences";
 import type { ConnectionTestResult, SettingsOut } from "../api/settings";
 import { getSettings, testConnection, updateSettings } from "../api/settings";
 import { ApiErrorMessage } from "../components/ApiErrorMessage";
 import { AppLayout } from "../components/AppLayout";
+import { FreezerCapacityField } from "../components/FreezerCapacityField";
 import { ModelField } from "../components/ModelField";
 import { ServingsField } from "../components/ServingsField";
+
+const EQUIPMENT_SUGGESTIONS = [
+  "oven",
+  "microwave",
+  "blender",
+  "food processor",
+  "slow cooker",
+  "pressure cooker",
+  "air fryer",
+  "stand mixer",
+  "rice cooker",
+  "grill",
+];
 
 export function Settings() {
   const [settings, setSettings] = useState<SettingsOut | null>(null);
   const [allergies, setAllergies] = useState<Allergy[]>([]);
   const [preferences, setPreferences] = useState<PreferenceNote[]>([]);
+  const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [newAllergyName, setNewAllergyName] = useState("");
   const [newPreference, setNewPreference] = useState("");
+  const [newEquipmentName, setNewEquipmentName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
   async function loadAll(): Promise<void> {
     // `loading` already starts `true` (see useState above) — this only
     // ever runs once, on mount, so there's no case to re-arm it here.
-    const [settingsResult, allergiesResult, preferencesResult] = await Promise.all([
-      getSettings(),
-      listAllergies(),
-      listPreferences(),
-    ]);
+    const [settingsResult, allergiesResult, preferencesResult, equipmentResult] =
+      await Promise.all([getSettings(), listAllergies(), listPreferences(), listEquipment()]);
     setSettings(settingsResult);
     setAllergies(allergiesResult);
     setPreferences(preferencesResult);
+    setEquipment(equipmentResult);
     setLoading(false);
   }
 
@@ -43,6 +59,22 @@ export function Settings() {
     setError(null);
     try {
       setSettings(await updateSettings(value, settings?.openrouter_model_id ?? undefined));
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  async function handleSaveFreezerCapacity(value: number): Promise<void> {
+    if (!settings) return;
+    setError(null);
+    try {
+      setSettings(
+        await updateSettings(
+          settings.default_servings,
+          settings.openrouter_model_id ?? undefined,
+          value,
+        ),
+      );
     } catch (err) {
       setError(err);
     }
@@ -108,6 +140,29 @@ export function Settings() {
     }
   }
 
+  async function handleAddEquipment(name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setError(null);
+    try {
+      const created = await addEquipment(trimmed);
+      setEquipment((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewEquipmentName("");
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  async function handleDeleteEquipment(id: number): Promise<void> {
+    setError(null);
+    try {
+      await deleteEquipment(id);
+      setEquipment((prev) => prev.filter((item) => item.id !== id));
+    } catch (err) {
+      setError(err);
+    }
+  }
+
   if (loading || !settings) {
     return (
       <AppLayout>
@@ -130,6 +185,10 @@ export function Settings() {
           <h2>🍽️ Household</h2>
         </div>
         <ServingsField value={settings.default_servings} onSave={handleSaveServings} />
+        <FreezerCapacityField
+          value={settings.freezer_capacity_slots}
+          onSave={handleSaveFreezerCapacity}
+        />
       </div>
 
       <div className="card">
@@ -217,6 +276,72 @@ export function Settings() {
                   type="button"
                   onClick={() => void handleDeletePreference(note.id)}
                   aria-label="Remove note"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <h2>🔧 Equipment</h2>
+        </div>
+        <p className="card-description">
+          A stovetop, pots/pans, knives and basic utensils are always assumed. List anything
+          else you own — only dishes that fit this list will be suggested.
+        </p>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleAddEquipment(newEquipmentName);
+          }}
+          className="inline-form"
+        >
+          <input
+            type="text"
+            placeholder="e.g. oven"
+            value={newEquipmentName}
+            onChange={(event) => setNewEquipmentName(event.target.value)}
+            aria-label="New equipment"
+          />
+          <button type="submit" className="btn btn-secondary">
+            Add
+          </button>
+        </form>
+        {EQUIPMENT_SUGGESTIONS.filter(
+          (suggestion) =>
+            !equipment.some((item) => item.name.toLowerCase() === suggestion.toLowerCase()),
+        ).length > 0 && (
+          <div className="tag-list suggestion-list">
+            {EQUIPMENT_SUGGESTIONS.filter(
+              (suggestion) =>
+                !equipment.some((item) => item.name.toLowerCase() === suggestion.toLowerCase()),
+            ).map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => void handleAddEquipment(suggestion)}
+              >
+                + {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
+        {equipment.length === 0 ? (
+          <p className="empty">No equipment recorded.</p>
+        ) : (
+          <ul className="tag-list">
+            {equipment.map((item) => (
+              <li key={item.id}>
+                <span>{item.name}</span>
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteEquipment(item.id)}
+                  aria-label={`Remove ${item.name}`}
                 >
                   ×
                 </button>

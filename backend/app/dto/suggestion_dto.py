@@ -6,18 +6,48 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.domain.suggestion import MealPlan, Suggestion
+from app.domain.suggestion import AgendaEntry, MealPlan, Suggestion
 from app.dto.dish_idea_dto import DishIdeaDtoOut
 from app.dto.fridge_stock_dto import FridgeStockItemDtoOut
+
+
+class IngredientDtoOut(BaseModel):
+    name: str
+    quantity: str | None = None
+    to_buy: bool = False
+
+
+def _decode_ingredients(ingredients_json: str) -> list[IngredientDtoOut]:
+    """`ingredients_json` moved from a list of plain strings to a list of
+    `{nom, quantite, a_acheter}` objects when the shopping-list feature was
+    added — a plan persisted before that change still has the old shape,
+    so each element is mapped individually rather than assuming the whole
+    list matches one format."""
+    raw = json.loads(ingredients_json)
+    result = []
+    for entry in raw:
+        if isinstance(entry, str):
+            result.append(IngredientDtoOut(name=entry))
+        else:
+            result.append(
+                IngredientDtoOut(
+                    name=entry["nom"],
+                    quantity=entry.get("quantite"),
+                    to_buy=entry.get("a_acheter", False),
+                )
+            )
+    return result
 
 
 class SuggestionDtoOut(BaseModel):
     id: int
     dish_name: str
     description: str
-    ingredients: list[str]
+    ingredients: list[IngredientDtoOut]
     steps: list[str]
     servings: int
+    fridge_days: int
+    freezer_friendly: bool
 
     @classmethod
     def from_domain(cls, suggestion: Suggestion) -> SuggestionDtoOut:
@@ -26,9 +56,27 @@ class SuggestionDtoOut(BaseModel):
             id=suggestion.id,
             dish_name=suggestion.dish_name,
             description=suggestion.description,
-            ingredients=json.loads(suggestion.ingredients_json),
+            ingredients=_decode_ingredients(suggestion.ingredients_json),
             steps=json.loads(suggestion.steps_json),
             servings=suggestion.servings,
+            fridge_days=suggestion.fridge_days,
+            freezer_friendly=suggestion.freezer_friendly,
+        )
+
+
+class AgendaEntryDtoOut(BaseModel):
+    day_index: int
+    suggestion_id: int
+    storage: Literal["fresh", "frozen", "at_risk"]
+    warning: str | None
+
+    @classmethod
+    def from_domain(cls, entry: AgendaEntry) -> AgendaEntryDtoOut:
+        return cls(
+            day_index=entry.day_index,
+            suggestion_id=entry.suggestion_id,
+            storage=entry.storage.value,
+            warning=entry.warning,
         )
 
 
@@ -66,6 +114,11 @@ class SuggestionsResultDtoOut(BaseModel):
     ideas: list[DishIdeaDtoOut] = Field(default_factory=list)
     notes_generales: str | None = None
     removed_stock_items: list[FridgeStockItemDtoOut] = Field(default_factory=list)
+    agenda: list[AgendaEntryDtoOut] = Field(default_factory=list)
+    """Only set for `completed`, and only when the plan was generated in
+    batch mode with a `days` count — see `services/meal_agenda_service.py`.
+    Unlike `notes_generales`/`removed_stock_items`, this one IS persisted
+    (see `MealPlanDtoOut.agenda`), so it's also present on later reads."""
     run_id: int | None = None
     question: str | None = None
     options: list[str] | None = None
@@ -94,6 +147,7 @@ class MealPlanDtoOut(BaseModel):
     mode: Literal["batch", "single"]
     created_at: datetime
     suggestions: list[SuggestionDtoOut]
+    agenda: list[AgendaEntryDtoOut] = Field(default_factory=list)
 
     @classmethod
     def from_domain(cls, meal_plan: MealPlan) -> MealPlanDtoOut:
@@ -103,4 +157,5 @@ class MealPlanDtoOut(BaseModel):
             mode=meal_plan.mode.value,
             created_at=meal_plan.created_at,
             suggestions=[SuggestionDtoOut.from_domain(s) for s in meal_plan.suggestions],
+            agenda=[AgendaEntryDtoOut.from_domain(entry) for entry in meal_plan.agenda],
         )

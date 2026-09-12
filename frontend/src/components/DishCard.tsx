@@ -12,12 +12,21 @@ export function DishCard({ dish }: { dish: Suggestion }) {
       </div>
       <p className="card-description">{dish.description}</p>
 
+      <div className="field-row">
+        <span className="badge badge-neutral">🧊 keeps {dish.fridge_days} day(s) in fridge</span>
+        {dish.freezer_friendly && <span className="badge badge-neutral">❄️ freezer-friendly</span>}
+      </div>
+
       <div className="field">
         <span className="field-label">Ingredients</span>
         <ul className="tag-list">
           {dish.ingredients.map((ingredient) => (
-            <li key={ingredient}>
-              <span>{ingredient}</span>
+            <li key={ingredient.name}>
+              <span>
+                {ingredient.name}
+                {ingredient.quantity && ` (${ingredient.quantity})`}
+              </span>
+              {ingredient.to_buy && <span className="badge badge-warning">🛒 to buy</span>}
             </li>
           ))}
         </ul>

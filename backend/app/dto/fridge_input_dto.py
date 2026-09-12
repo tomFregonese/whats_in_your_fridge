@@ -16,19 +16,36 @@ class FridgeInputItemDtoIn(BaseModel):
     fridge_stock_item_id: int | None = None
 
 
+MIN_DAYS = 1
+MAX_DAYS = 14
+
+
 class FridgeInputDtoIn(BaseModel):
     """Structured items and/or free text — usable separately or together,
     per the original brief. At least one of the two must be provided.
+
+    `days` is only meaningful in `batch` mode — how many days this
+    batch-cooking session should cover, sizing the idea shortlist (see
+    `agent/prompts.py`) and later feeding the agenda scheduler (see
+    `services/meal_agenda_service.py`). Required in `batch` mode,
+    ignored (forced to `None`) in `single` mode.
     """
 
     mode: Literal["batch", "single"] = "batch"
     free_text: str | None = None
     items: list[FridgeInputItemDtoIn] = Field(default_factory=list)
+    days: int | None = Field(default=None, ge=MIN_DAYS, le=MAX_DAYS)
 
     @model_validator(mode="after")
     def _require_items_or_free_text(self) -> Self:
         if not self.items and not (self.free_text and self.free_text.strip()):
             raise ValueError("Provide at least one ingredient or some free text.")
+        return self
+
+    @model_validator(mode="after")
+    def _require_days_in_batch_mode(self) -> Self:
+        if self.mode == "batch" and self.days is None:
+            raise ValueError("`days` is required in batch mode.")
         return self
 
     def to_domain(self) -> FridgeInput:
@@ -38,6 +55,7 @@ class FridgeInputDtoIn(BaseModel):
             mode=FridgeInputMode(self.mode),
             free_text=self.free_text,
             created_at=now,
+            days=self.days if self.mode == "batch" else None,
             items=[
                 FridgeInputItem(
                     id=None,
