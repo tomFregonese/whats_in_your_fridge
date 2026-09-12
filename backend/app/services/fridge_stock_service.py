@@ -1,8 +1,10 @@
 import itertools
+import re
 from collections.abc import Iterator
 from typing import Literal
 
 from app.agent import duplicate_check
+from app.agent.text_normalize import normalize
 from app.dictation_streaming_service import stream_dictation
 from app.domain.fridge_stock import FridgeStockItem
 from app.domain.merge_suggestion import MergeSuggestion
@@ -154,34 +156,43 @@ class FridgeStockService:
 
     def merge_items(self, *, keep_id: int, remove_id: int, merged_name: str) -> FridgeStockItem:
         """Combines two stock rows into the one at `keep_id`, then deletes
-        `remove_id`. Quantities are only summed when both rows agree on
-        `quantity_unit` (including both `None`, i.e. two bare counts) and
-        both have a numeric value — anything else (different units, a
-        vague/null amount on either side) is too ambiguous to combine
-        automatically, so `keep_id`'s own quantity is left untouched and
-        the user can adjust it by hand afterward."""
+        `remove_id`. The two quantities are summed as numbers — converting
+        between compatible units first (e.g. 500g + 1kg = 1.5kg), never
+        guessing across incompatible ones (e.g. kg vs a bare count) —
+        whenever both sides can be confidently read as a plain number (see
+        `_sum_numeric_quantities`). That conversion/summing is plain
+        deterministic code, not the local model: same "never trust the
+        LLM with verifiable arithmetic" stance already used for every
+        other quantity in this app (`agent/quantity_sanity_check.py`,
+        `agent/conservation_sanity_check.py`) — and unlike duplicate-name
+        detection (`agent/duplicate_check.py`), reading "1kg"/"6kg" and
+        adding them up isn't a judgment call an LLM is actually needed
+        for.
+
+        Either side being too vague to read as a number (an incompatible
+        unit, free text like "a bit", or nothing at all) falls back to
+        combining both as text (`_combine_quantity_descriptions`) rather
+        than keeping only `keep_id`'s and silently discarding
+        `remove_id`'s entirely.
+
+        The result always lands in `quantity_raw` — never
+        `quantity_value`/`quantity_unit`, which `pages/Fridge.tsx` never
+        reads or lets the user edit for a stock row (only voice dictation,
+        a different flow, uses those two)."""
         keep = self._repository.get(keep_id)
         remove = self._repository.get(remove_id)
         if keep is None or remove is None:
             raise NotFoundError("One of the fridge stock items to merge no longer exists.")
 
-        same_unit = keep.quantity_unit == remove.quantity_unit
-        both_have_values = keep.quantity_value is not None and remove.quantity_value is not None
-        if same_unit and both_have_values:
-            assert keep.quantity_value is not None and remove.quantity_value is not None
-            quantity_value: float | None = keep.quantity_value + remove.quantity_value
-            quantity_unit = keep.quantity_unit
-            quantity_raw = None
-        else:
-            quantity_value = keep.quantity_value
-            quantity_unit = keep.quantity_unit
-            quantity_raw = keep.quantity_raw
+        quantity_raw = _sum_numeric_quantities(keep, remove) or _combine_quantity_descriptions(
+            keep, remove
+        )
 
         merged = self._repository.update(
             keep_id,
             ingredient_name=merged_name.strip(),
-            quantity_value=quantity_value,
-            quantity_unit=quantity_unit,
+            quantity_value=None,
+            quantity_unit=None,
             quantity_raw=quantity_raw,
         )
         assert merged is not None
@@ -190,3 +201,123 @@ class FridgeStockService:
 
     def dismiss_merge_suggestion(self, name_a: str, name_b: str) -> None:
         self._dismissal_repository.dismiss(name_a, name_b)
+
+
+# Normalized (see `agent/text_normalize.normalize` — case/accent-insensitive,
+# same helper `allergy_check`/`equipment_check` use) unit token -> (dimension,
+# factor to that dimension's base unit: grams for mass, millilitres for
+# volume) — lets `_sum_numeric_quantities` convert between units of the same
+# kind (500g + 1kg) rather than requiring an exact match.
+_UNIT_FACTORS: dict[str, tuple[str, float]] = {
+    "g": ("mass", 1),
+    "gr": ("mass", 1),
+    "gramme": ("mass", 1),
+    "grammes": ("mass", 1),
+    "gram": ("mass", 1),
+    "grams": ("mass", 1),
+    "kg": ("mass", 1000),
+    "kilo": ("mass", 1000),
+    "kilos": ("mass", 1000),
+    "kilogramme": ("mass", 1000),
+    "kilogrammes": ("mass", 1000),
+    "kilogram": ("mass", 1000),
+    "kilograms": ("mass", 1000),
+    "mg": ("mass", 0.001),
+    "ml": ("volume", 1),
+    "millilitre": ("volume", 1),
+    "millilitres": ("volume", 1),
+    "cl": ("volume", 10),
+    "centilitre": ("volume", 10),
+    "centilitres": ("volume", 10),
+    "l": ("volume", 1000),
+    "litre": ("volume", 1000),
+    "litres": ("volume", 1000),
+    "liter": ("volume", 1000),
+    "liters": ("volume", 1000),
+}
+
+# Matches a *plain* "NUMBER" or "NUMBER UNIT" quantity_raw, nothing else —
+# deliberately conservative: "1kg", "500 g", "6" all match; "about 2kg",
+# "1kg (frozen)", "a bit less than a kilo" don't, and fall back to
+# `_combine_quantity_descriptions` rather than risk misreading free text.
+_RAW_QUANTITY_RE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*([a-zA-ZÀ-ÿ]*)\s*$")
+
+
+def _parsed_amount(item: FridgeStockItem) -> tuple[float, str] | None:
+    """(value, unit token) read with confidence from `item` — either
+    already structured (`quantity_value`/`quantity_unit`, the dictation
+    shape) or a `quantity_raw` that's cleanly "NUMBER" or "NUMBER UNIT"
+    (see `_RAW_QUANTITY_RE`). `None` when neither is available or
+    `quantity_raw` doesn't match that shape."""
+    if item.quantity_value is not None:
+        return item.quantity_value, item.quantity_unit or ""
+    if item.quantity_raw:
+        match = _RAW_QUANTITY_RE.match(item.quantity_raw)
+        if match:
+            value_str, unit_token = match.groups()
+            return float(value_str.replace(",", ".")), unit_token
+    return None
+
+
+def _dimension(unit_token: str) -> tuple[str, float]:
+    """The "kind" a unit belongs to (so two amounts of the same kind can
+    be summed) plus its factor to that kind's base unit. A bare count
+    (`unit_token` empty) is its own kind. An unrecognized unit (a custom
+    "boîtes", "sachets", ...) still gets a kind of its own, keyed by its
+    normalized spelling — two occurrences of the exact same unrecognized
+    unit can still be summed together, just never converted to/from a
+    different one this module doesn't know how to relate it to."""
+    if not unit_token:
+        return "count", 1.0
+    normalized = normalize(unit_token)
+    return _UNIT_FACTORS.get(normalized, (normalized, 1.0))
+
+
+def _sum_numeric_quantities(keep: FridgeStockItem, remove: FridgeStockItem) -> str | None:
+    """A human-readable total (e.g. "1.5 kg") when both quantities parse
+    (see `_parsed_amount`) as the same kind of unit (see `_dimension`) —
+    `None` when either side is too vague to read as a number, or the two
+    units aren't the same kind (e.g. kg vs a bare count); `merge_items()`
+    falls back to combining both as text in that case."""
+    keep_amount = _parsed_amount(keep)
+    remove_amount = _parsed_amount(remove)
+    if keep_amount is None or remove_amount is None:
+        return None
+
+    keep_value, keep_unit = keep_amount
+    remove_value, remove_unit = remove_amount
+    keep_dimension, keep_factor = _dimension(keep_unit)
+    remove_dimension, remove_factor = _dimension(remove_unit)
+    if keep_dimension != remove_dimension:
+        return None
+
+    # Expressed in `keep`'s own unit/spelling — it's the row that
+    # survives, and keeps the result consistent with whatever the
+    # household is used to typing.
+    total = keep_value + remove_value * remove_factor / keep_factor
+    return f"{total:g} {keep_unit}".strip()
+
+
+def _describe_quantity(item: FridgeStockItem) -> str | None:
+    """Human-readable amount for one side of a merge that can't be summed
+    as a clean number — prefers the free-text `quantity_raw` a manually
+    typed item actually has; falls back to formatting `quantity_value`/
+    `quantity_unit` for a dictated one. `None` when the item carries no
+    quantity information at all."""
+    if item.quantity_raw:
+        return item.quantity_raw
+    if item.quantity_value is not None:
+        unit = f" {item.quantity_unit}" if item.quantity_unit else ""
+        return f"{item.quantity_value:g}{unit}"
+    return None
+
+
+def _combine_quantity_descriptions(keep: FridgeStockItem, remove: FridgeStockItem) -> str | None:
+    """Used by `merge_items()` whenever the two quantities can't be summed
+    into one number — joins both sides' amounts into `quantity_raw` so
+    neither is silently lost, rather than keeping only `keep`'s."""
+    keep_desc = _describe_quantity(keep)
+    remove_desc = _describe_quantity(remove)
+    if keep_desc and remove_desc and keep_desc != remove_desc:
+        return f"{keep_desc} + {remove_desc}"
+    return keep_desc or remove_desc
