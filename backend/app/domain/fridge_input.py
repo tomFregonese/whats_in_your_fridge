@@ -12,6 +12,29 @@ class FridgeInputMode(StrEnum):
     SINGLE = "single"
 
 
+class SourcingMode(StrEnum):
+    """How strictly a generation should stick to what's already available,
+    orthogonal to `FridgeInputMode` (which is about session shape, not
+    ingredient sourcing). Read by `agent/prompts.py::build_system_prompt`
+    to steer the model, and enforced deterministically for `FRIDGE_ONLY`
+    by `agent/sourcing_check.py` — see that module's docstring.
+    """
+
+    FRIDGE_ONLY = "fridge_only"
+    """Never propose an ingredient that isn't already available (fridge
+    selection, free-typed extras, or pantry staples) — no shopping list."""
+
+    FRIDGE_PLUS_SHOPPING = "fridge_plus_shopping"
+    """Prefer the fridge, but a few extra ingredients are fine as long as
+    they're flagged (`a_acheter`) for the shopping list. The default —
+    matches this app's original, only behavior before this enum existed."""
+
+    SHOPPING_ONLY = "shopping_only"
+    """Plan freely without trying to use up the fridge — everything beyond
+    pantry staples (and whatever fridge items the household opportunistically
+    picked) ends up on the shopping list."""
+
+
 @dataclass
 class FridgeInputItem:
     """One structured ingredient entry attached to a `FridgeInput`.
@@ -48,6 +71,7 @@ class FridgeInput:
     free_text: str | None
     created_at: datetime
     items: list[FridgeInputItem] = field(default_factory=list)
+    sourcing_mode: SourcingMode = SourcingMode.FRIDGE_PLUS_SHOPPING
     days: int | None = None
     """Number of days this batch-cooking session should cover — only
     meaningful when `mode == BATCH` (see `dto/fridge_input_dto.py`'s

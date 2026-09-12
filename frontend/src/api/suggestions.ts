@@ -6,8 +6,14 @@ export interface FridgeInputItemPayload {
   fridge_stock_item_id?: number;
 }
 
+/** How strictly a generation should stick to what's already available —
+ * orthogonal to `mode` (session shape). Defaults to `fridge_plus_shopping`
+ * on the backend when omitted, matching this app's original behavior. */
+export type SourcingMode = "fridge_only" | "fridge_plus_shopping" | "shopping_only";
+
 export interface FridgeInputPayload {
   mode: "batch" | "single";
+  sourcing_mode: SourcingMode;
   /** Required by the backend when `mode === "batch"` — how many days this
    * batch-cooking session should cover, sizing the idea shortlist and
    * later the agenda (see `MealAgenda`). Ignored in `single` mode. */

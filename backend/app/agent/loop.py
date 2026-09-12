@@ -44,6 +44,7 @@ from app.agent import (
     client,
     conservation_sanity_check,
     equipment_check,
+    sourcing_check,
     stock_reference_check,
 )
 from app.agent.output_schema import (
@@ -57,6 +58,7 @@ from app.domain.agent_run import AgentRunPhase
 from app.domain.allergy import Allergy
 from app.domain.dish_idea import DishIdea
 from app.domain.equipment import Equipment
+from app.domain.fridge_input import SourcingMode
 from app.domain.suggestion import AllergyCheckStatus, Suggestion
 from app.services.exceptions import AgentResponseInvalidError
 
@@ -103,6 +105,7 @@ def run(
     messages: list[ChatCompletionMessageParam],
     allergies: list[Allergy],
     equipment: list[Equipment],
+    sourcing_mode: SourcingMode,
     selected_dish_names: list[str],
     known_stock_item_ids: AbstractSet[int] = frozenset(),
 ) -> LoopResult:
@@ -169,17 +172,24 @@ def run(
             allergy_safe, allergy_violations = allergy_check.check_all(
                 plats_args.plats, allergies
             )
-            safe_plats, equipment_violations = equipment_check.check_all(allergy_safe, equipment)
+            equipment_safe, equipment_violations = equipment_check.check_all(
+                allergy_safe, equipment
+            )
+            safe_plats, sourcing_violations = sourcing_check.check_all(
+                equipment_safe, sourcing_mode
+            )
             stock_reference_check.sanitize_stock_ids(safe_plats, known_stock_item_ids)
             conservation_sanity_check.sanitize_fridge_days(safe_plats)
 
-            if allergy_violations or equipment_violations:
+            if allergy_violations or equipment_violations or sourcing_violations:
                 if last_attempt:
                     # Out of attempts — resolve now rather than erroring
                     # out: keep whatever's safe, drop the rest, and say so.
-                    dropped_names = [v.plat.nom for v in allergy_violations] + [
-                        v.plat.nom for v in equipment_violations
-                    ]
+                    dropped_names = (
+                        [v.plat.nom for v in allergy_violations]
+                        + [v.plat.nom for v in equipment_violations]
+                        + [v.plat.nom for v in sourcing_violations]
+                    )
                     note = _dropped_note(plats_args.notes_generales, dropped_names)
                     return PlatsProposed(
                         suggestions=[
@@ -191,7 +201,9 @@ def run(
                 working_messages.append(
                     _tool_error_message(
                         tool_call.id,
-                        _combined_violation_message(allergy_violations, equipment_violations),
+                        _combined_violation_message(
+                            allergy_violations, equipment_violations, sourcing_violations
+                        ),
                     )
                 )
                 continue
@@ -301,6 +313,7 @@ def stream_run(
     messages: list[ChatCompletionMessageParam],
     allergies: list[Allergy],
     equipment: list[Equipment],
+    sourcing_mode: SourcingMode,
     selected_dish_names: list[str],
     reasoning_callback: Callable[[str], None],
     known_stock_item_ids: AbstractSet[int] = frozenset(),
@@ -366,15 +379,22 @@ def stream_run(
             allergy_safe, allergy_violations = allergy_check.check_all(
                 plats_args.plats, allergies
             )
-            safe_plats, equipment_violations = equipment_check.check_all(allergy_safe, equipment)
+            equipment_safe, equipment_violations = equipment_check.check_all(
+                allergy_safe, equipment
+            )
+            safe_plats, sourcing_violations = sourcing_check.check_all(
+                equipment_safe, sourcing_mode
+            )
             stock_reference_check.sanitize_stock_ids(safe_plats, known_stock_item_ids)
             conservation_sanity_check.sanitize_fridge_days(safe_plats)
 
-            if allergy_violations or equipment_violations:
+            if allergy_violations or equipment_violations or sourcing_violations:
                 if last_attempt:
-                    dropped_names = [v.plat.nom for v in allergy_violations] + [
-                        v.plat.nom for v in equipment_violations
-                    ]
+                    dropped_names = (
+                        [v.plat.nom for v in allergy_violations]
+                        + [v.plat.nom for v in equipment_violations]
+                        + [v.plat.nom for v in sourcing_violations]
+                    )
                     note = _dropped_note(plats_args.notes_generales, dropped_names)
                     return PlatsProposed(
                         suggestions=[
@@ -386,7 +406,9 @@ def stream_run(
                 working_messages.append(
                     _tool_error_message(
                         tool_call.get("id", ""),
-                        _combined_violation_message(allergy_violations, equipment_violations),
+                        _combined_violation_message(
+                            allergy_violations, equipment_violations, sourcing_violations
+                        ),
                     )
                 )
                 continue
@@ -511,6 +533,7 @@ def _to_tool_call_param_stream(
 def _combined_violation_message(
     allergy_violations: list[allergy_check.Violation],
     equipment_violations: list[equipment_check.Violation],
+    sourcing_violations: list[sourcing_check.Violation],
 ) -> str:
     parts = []
     if allergy_violations:
@@ -519,6 +542,11 @@ def _combined_violation_message(
     if equipment_violations:
         details = "; ".join(f'"{v.plat.nom}" needs {v.equipment}' for v in equipment_violations)
         parts.append(f"need equipment the household doesn't have ({details})")
+    if sourcing_violations:
+        details = "; ".join(
+            f'"{v.plat.nom}" needs {v.ingredient} bought' for v in sourcing_violations
+        )
+        parts.append(f"need an ingredient the household asked to avoid buying ({details})")
     return (
         f"The following dish(es) cannot be shown because they {' and/or '.join(parts)}. Call "
         "`proposer_plats` again with corrected dishes that fix every issue listed."

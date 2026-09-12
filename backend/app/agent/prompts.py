@@ -17,7 +17,12 @@ system prompt.
 from app.domain.agent_run import AgentRunPhase
 from app.domain.allergy import Allergy
 from app.domain.equipment import Equipment
-from app.domain.fridge_input import FridgeInput, FridgeInputItem, FridgeInputMode
+from app.domain.fridge_input import (
+    FridgeInput,
+    FridgeInputItem,
+    FridgeInputMode,
+    SourcingMode,
+)
 from app.domain.preference_note import PreferenceNote
 
 PANTRY_STAPLES = "salt, pepper, cooking oil, water"
@@ -37,6 +42,7 @@ def build_system_prompt(
     equipment: list[Equipment],
     preferences: list[PreferenceNote],
     phase: AgentRunPhase,
+    sourcing_mode: SourcingMode,
     mode: FridgeInputMode | None = None,
     days: int | None = None,
     dedup_context: str = "",
@@ -45,11 +51,8 @@ def build_system_prompt(
         raise ValueError("`mode` is required to size the idea shortlist in the IDEAS phase.")
 
     lines = [
-        "You are a batch-cooking assistant for a self-hosted household app. "
-        "Suggest dishes to cook primarily from what's in the fridge — a few ingredients "
-        "the household doesn't have are fine as long as they're clearly flagged (see "
-        "`a_acheter` below) so they end up on a shopping list, rather than silently "
-        "assumed available.",
+        "You are a batch-cooking assistant for a self-hosted household app.",
+        _sourcing_instruction(sourcing_mode),
         f"Default number of servings, unless the user says otherwise: {default_servings}.",
         f"Assume these pantry staples are always available: {PANTRY_STAPLES}.",
         f"Assume this equipment is always available: {BASE_EQUIPMENT}.",
@@ -128,6 +131,28 @@ def build_system_prompt(
         )
 
     return "\n".join(lines)
+
+
+def _sourcing_instruction(sourcing_mode: SourcingMode) -> str:
+    if sourcing_mode == SourcingMode.FRIDGE_ONLY:
+        return (
+            "Only propose dishes fully makeable from the fridge contents below plus the "
+            "pantry staples — never include an ingredient that would need to be bought, "
+            "and never set `a_acheter` to true on any ingredient."
+        )
+    if sourcing_mode == SourcingMode.SHOPPING_ONLY:
+        return (
+            "The household is planning a shopping trip, not trying to use up the fridge — "
+            "don't limit dish ideas to the fridge contents below. Set `a_acheter` to true "
+            "on every ingredient that isn't a pantry staple or already in the fridge "
+            "contents, so it ends up on the shopping list."
+        )
+    return (
+        "Suggest dishes to cook primarily from what's in the fridge — a few ingredients "
+        "the household doesn't have are fine as long as they're clearly flagged (see "
+        "`a_acheter` below) so they end up on a shopping list, rather than silently "
+        "assumed available."
+    )
 
 
 def _idea_count_hint(mode: FridgeInputMode, days: int | None) -> str:

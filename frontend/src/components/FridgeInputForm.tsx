@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import type { FridgeStockItem } from "../api/fridgeStock";
 import { listFridgeStockItems } from "../api/fridgeStock";
-import type { DishIdea, RemovedStockItem } from "../api/suggestions";
+import type { DishIdea, RemovedStockItem, SourcingMode } from "../api/suggestions";
 import {
   createSuggestionsStream,
   respondToClarificationStream,
@@ -44,6 +44,7 @@ const MAX_DAYS = 14;
 export function FridgeInputForm() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<"batch" | "single">("batch");
+  const [sourcingMode, setSourcingMode] = useState<SourcingMode>("fridge_plus_shopping");
   const [days, setDays] = useState(DEFAULT_DAYS);
   const [stockItems, setStockItems] = useState<FridgeStockItem[]>([]);
   const [selectedStockIds, setSelectedStockIds] = useState<number[]>([]);
@@ -179,6 +180,7 @@ export function FridgeInputForm() {
         const selectedStockItems = stockItems.filter((item) => selectedStockIds.includes(item.id));
         const { run_id } = await createSuggestionsStream({
           mode,
+          sourcing_mode: sourcingMode,
           days: mode === "batch" ? days : undefined,
           free_text: freeText.trim() || undefined,
           items: [
@@ -227,7 +229,17 @@ export function FridgeInputForm() {
         setStreamingActive(false);
       }
     },
-    [selectedStockIds, stockItems, ingredients, freeText, mode, days, cleanup, handleSseEvent],
+    [
+      selectedStockIds,
+      stockItems,
+      ingredients,
+      freeText,
+      mode,
+      sourcingMode,
+      days,
+      cleanup,
+      handleSseEvent,
+    ],
   );
 
   return (
@@ -280,6 +292,41 @@ export function FridgeInputForm() {
               selectedIds={selectedStockIds}
               onChange={setSelectedStockIds}
             />
+          </div>
+
+          <div className="field">
+            <span className="field-label">Sourcing</span>
+            <div className="segmented">
+              <button
+                type="button"
+                className={sourcingMode === "fridge_only" ? "active" : ""}
+                onClick={() => setSourcingMode("fridge_only")}
+              >
+                Fridge only
+              </button>
+              <button
+                type="button"
+                className={sourcingMode === "fridge_plus_shopping" ? "active" : ""}
+                onClick={() => setSourcingMode("fridge_plus_shopping")}
+              >
+                Fridge + top-up
+              </button>
+              <button
+                type="button"
+                className={sourcingMode === "shopping_only" ? "active" : ""}
+                onClick={() => setSourcingMode("shopping_only")}
+              >
+                Shopping list
+              </button>
+            </div>
+            <p className="field-hint">
+              {sourcingMode === "fridge_only" &&
+                "Only what's already available — nothing to buy."}
+              {sourcingMode === "fridge_plus_shopping" &&
+                "Prefer the fridge, but a few extra ingredients can go on a shopping list."}
+              {sourcingMode === "shopping_only" &&
+                "Plan freely — everything beyond pantry staples goes on the shopping list."}
+            </p>
           </div>
 
           <IngredientListInput

@@ -151,6 +151,7 @@ def create_suggestions_stream(
         preferences=[],
         dedup_context=dedup_provider.get_exclusion_context(),
         phase=AgentRunPhase.IDEAS,
+        sourcing_mode=saved_input.sourcing_mode,
         mode=saved_input.mode,
         days=saved_input.days,
     )

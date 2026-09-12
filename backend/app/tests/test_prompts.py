@@ -6,7 +6,7 @@ from app.agent import prompts
 from app.domain.agent_run import AgentRunPhase
 from app.domain.allergy import Allergy
 from app.domain.equipment import Equipment
-from app.domain.fridge_input import FridgeInput, FridgeInputItem, FridgeInputMode
+from app.domain.fridge_input import FridgeInput, FridgeInputItem, FridgeInputMode, SourcingMode
 from app.domain.preference_note import PreferenceNote, PreferenceSource
 
 
@@ -16,6 +16,7 @@ def test_system_prompt_includes_servings_and_pantry_staples() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.RECIPES,
     )
 
@@ -33,6 +34,7 @@ def test_system_prompt_includes_allergies_when_present() -> None:
         allergies=allergies,
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.RECIPES,
     )
 
@@ -46,6 +48,7 @@ def test_system_prompt_omits_allergy_section_when_none() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.RECIPES,
     )
 
@@ -60,6 +63,7 @@ def test_system_prompt_includes_equipment_when_present() -> None:
         allergies=[],
         equipment=equipment,
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.RECIPES,
     )
 
@@ -72,6 +76,7 @@ def test_system_prompt_forbids_extra_equipment_when_none_listed() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.RECIPES,
     )
 
@@ -84,6 +89,7 @@ def test_system_prompt_includes_dedup_context_when_present() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.RECIPES,
         dedup_context='Recently suggested dishes to avoid repeating: "Carrot soup".',
     )
@@ -97,6 +103,7 @@ def test_system_prompt_omits_dedup_section_when_empty() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.RECIPES,
         dedup_context="",
     )
@@ -119,10 +126,72 @@ def test_system_prompt_includes_preferences_when_present() -> None:
         allergies=[],
         equipment=[],
         preferences=preferences,
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.RECIPES,
     )
 
     assert "loves spicy food" in prompt
+
+
+# --- Sourcing mode instructions ---
+
+
+def test_fridge_only_forbids_buying_anything() -> None:
+    prompt = prompts.build_system_prompt(
+        default_servings=4,
+        allergies=[],
+        equipment=[],
+        preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_ONLY,
+        phase=AgentRunPhase.RECIPES,
+    )
+
+    assert "never set `a_acheter` to true" in prompt
+    assert "never include an ingredient that would need to be bought" in prompt
+
+
+def test_fridge_plus_shopping_allows_a_few_extras() -> None:
+    prompt = prompts.build_system_prompt(
+        default_servings=4,
+        allergies=[],
+        equipment=[],
+        preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
+        phase=AgentRunPhase.RECIPES,
+    )
+
+    assert "a few ingredients" in prompt
+    assert "a_acheter" in prompt
+
+
+def test_shopping_only_does_not_limit_ideas_to_the_fridge() -> None:
+    prompt = prompts.build_system_prompt(
+        default_servings=4,
+        allergies=[],
+        equipment=[],
+        preferences=[],
+        sourcing_mode=SourcingMode.SHOPPING_ONLY,
+        phase=AgentRunPhase.RECIPES,
+    )
+
+    assert "don't limit dish ideas to the fridge contents" in prompt
+    assert "planning a shopping trip" in prompt
+
+
+def test_sourcing_mode_wording_differs_across_all_three_modes() -> None:
+    prompts_by_mode = {
+        mode: prompts.build_system_prompt(
+            default_servings=4,
+            allergies=[],
+            equipment=[],
+            preferences=[],
+            sourcing_mode=mode,
+            phase=AgentRunPhase.RECIPES,
+        )
+        for mode in SourcingMode
+    }
+
+    assert len({p for p in prompts_by_mode.values()}) == len(SourcingMode)
 
 
 # --- Phase-specific instructions ---
@@ -134,6 +203,7 @@ def test_ideas_phase_instructs_proposer_idees_not_proposer_plats() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.IDEAS,
         mode=FridgeInputMode.BATCH,
         days=5,
@@ -149,6 +219,7 @@ def test_recipes_phase_instructs_proposer_plats_not_proposer_idees() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.RECIPES,
     )
 
@@ -163,6 +234,7 @@ def test_ideas_phase_requires_mode() -> None:
             allergies=[],
             equipment=[],
             preferences=[],
+            sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
             phase=AgentRunPhase.IDEAS,
         )
 
@@ -173,6 +245,7 @@ def test_ideas_phase_hint_varies_by_mode() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.IDEAS,
         mode=FridgeInputMode.BATCH,
     )
@@ -181,6 +254,7 @@ def test_ideas_phase_hint_varies_by_mode() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.IDEAS,
         mode=FridgeInputMode.SINGLE,
     )
@@ -196,6 +270,7 @@ def test_ideas_phase_batch_hint_mentions_days_and_reuse() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.IDEAS,
         mode=FridgeInputMode.BATCH,
         days=5,
@@ -211,6 +286,7 @@ def test_recipes_phase_instructs_equipment_and_conservation_fields() -> None:
         allergies=[],
         equipment=[],
         preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
         phase=AgentRunPhase.RECIPES,
     )
 

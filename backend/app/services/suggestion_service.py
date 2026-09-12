@@ -111,6 +111,7 @@ class SuggestionService:
             preferences=self._preference_repository.list_all(),
             dedup_context=self._dedup_provider.get_exclusion_context(),
             phase=AgentRunPhase.IDEAS,
+            sourcing_mode=saved_input.sourcing_mode,
             mode=saved_input.mode,
             days=fridge_input.days,
         )
@@ -252,6 +253,7 @@ class SuggestionService:
             messages=messages,
             allergies=self._allergy_repository.list_all(),
             equipment=self._equipment_repository.list_all(),
+            sourcing_mode=fridge_input.sourcing_mode,
             selected_dish_names=selected_dish_names,
             known_stock_item_ids=known_stock_item_ids,
         )

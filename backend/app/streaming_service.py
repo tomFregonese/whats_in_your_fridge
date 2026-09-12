@@ -38,7 +38,7 @@ from app.domain.agent_run import AgentRun, AgentRunPhase, AgentRunStatus
 from app.domain.allergy import Allergy
 from app.domain.dish_idea import DishIdea
 from app.domain.equipment import Equipment
-from app.domain.fridge_input import FridgeInput, FridgeInputMode
+from app.domain.fridge_input import FridgeInput, FridgeInputMode, SourcingMode
 from app.domain.fridge_stock import FridgeStockItem
 from app.domain.suggestion import AgendaEntry, MealPlan
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
@@ -130,6 +130,7 @@ def _stream_run_recipes(
     messages: list[ChatCompletionMessageParam],
     allergies: list[Allergy],
     equipment: list[Equipment],
+    sourcing_mode: SourcingMode,
     selected_dish_names: list[str],
     known_stock_item_ids: set[int],
 ) -> LoopResult:
@@ -139,6 +140,7 @@ def _stream_run_recipes(
         messages=messages,
         allergies=allergies,
         equipment=equipment,
+        sourcing_mode=sourcing_mode,
         selected_dish_names=selected_dish_names,
         known_stock_item_ids=known_stock_item_ids,
         reasoning_callback=lambda text: _event(run_id, {"type": "reasoning", "content": text}),
@@ -205,6 +207,7 @@ def start_background(
                         messages=current_messages,
                         allergies=allergies,
                         equipment=equipment,
+                        sourcing_mode=fridge_input.sourcing_mode,
                         selected_dish_names=selected_dish_names,
                         known_stock_item_ids=known_stock_item_ids,
                     )

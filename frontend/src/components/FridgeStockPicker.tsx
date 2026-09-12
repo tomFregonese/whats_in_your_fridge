@@ -32,23 +32,45 @@ export function FridgeStockPicker({ items, selectedIds, onChange }: FridgeStockP
     );
   }
 
+  const allSelected = items.every((item) => selectedIds.includes(item.id));
+
   return (
-    <ul className="tag-list tag-list--selectable">
-      {items.map((item) => (
-        <li key={item.id}>
-          <label>
-            <input
-              type="checkbox"
-              checked={selectedIds.includes(item.id)}
-              onChange={() => toggle(item.id)}
-            />
-            <span>
-              {item.ingredient_name}
-              {item.quantity_raw && <span className="model-meta"> · {item.quantity_raw}</span>}
-            </span>
-          </label>
-        </li>
-      ))}
-    </ul>
+    <>
+      <div className="picker-select-all">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => onChange(items.map((item) => item.id))}
+          disabled={allSelected}
+        >
+          Select all
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => onChange([])}
+          disabled={selectedIds.length === 0}
+        >
+          Deselect all
+        </button>
+      </div>
+      <ul className="tag-list tag-list--selectable">
+        {items.map((item) => (
+          <li key={item.id}>
+            <label>
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(item.id)}
+                onChange={() => toggle(item.id)}
+              />
+              <span>
+                {item.ingredient_name}
+                {item.quantity_raw && <span className="model-meta"> · {item.quantity_raw}</span>}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }

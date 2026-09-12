@@ -5,7 +5,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.domain.fridge_input import FridgeInput, FridgeInputItem, FridgeInputMode
+from app.domain.fridge_input import FridgeInput, FridgeInputItem, FridgeInputMode, SourcingMode
 
 
 class FridgeInputItemDtoIn(BaseModel):
@@ -32,6 +32,9 @@ class FridgeInputDtoIn(BaseModel):
     """
 
     mode: Literal["batch", "single"] = "batch"
+    sourcing_mode: Literal["fridge_only", "fridge_plus_shopping", "shopping_only"] = (
+        "fridge_plus_shopping"
+    )
     free_text: str | None = None
     items: list[FridgeInputItemDtoIn] = Field(default_factory=list)
     days: int | None = Field(default=None, ge=MIN_DAYS, le=MAX_DAYS)
@@ -53,6 +56,7 @@ class FridgeInputDtoIn(BaseModel):
         return FridgeInput(
             id=None,
             mode=FridgeInputMode(self.mode),
+            sourcing_mode=SourcingMode(self.sourcing_mode),
             free_text=self.free_text,
             created_at=now,
             days=self.days if self.mode == "batch" else None,

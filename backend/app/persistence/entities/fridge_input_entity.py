@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from sqlmodel import Field, SQLModel
 
-from app.domain.fridge_input import FridgeInput, FridgeInputItem, FridgeInputMode
+from app.domain.fridge_input import FridgeInput, FridgeInputItem, FridgeInputMode, SourcingMode
 
 
 class FridgeInputEntity(SQLModel, table=True):
@@ -12,6 +12,7 @@ class FridgeInputEntity(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     mode: str
+    sourcing_mode: str = SourcingMode.FRIDGE_PLUS_SHOPPING.value
     free_text: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     days: int | None = None
@@ -23,6 +24,7 @@ class FridgeInputEntity(SQLModel, table=True):
         return FridgeInput(
             id=self.id,
             mode=FridgeInputMode(self.mode),
+            sourcing_mode=SourcingMode(self.sourcing_mode),
             free_text=self.free_text,
             created_at=self.created_at,
             days=self.days,
@@ -33,6 +35,7 @@ class FridgeInputEntity(SQLModel, table=True):
         return cls(
             id=fridge_input.id,
             mode=fridge_input.mode.value,
+            sourcing_mode=fridge_input.sourcing_mode.value,
             free_text=fridge_input.free_text,
             created_at=fridge_input.created_at,
             days=fridge_input.days,

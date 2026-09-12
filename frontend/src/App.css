@@ -230,6 +230,12 @@
   gap: var(--space-4);
 }
 
+.field-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
 input[type="text"],
 input[type="number"],
 input[type="password"],
@@ -548,6 +554,12 @@ textarea:focus {
 }
 
 /* ---------- Selectable chip list (fridge stock picker) ---------- */
+
+.picker-select-all {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
 
 .tag-list--selectable li {
   padding: 0.3rem 0.9rem;

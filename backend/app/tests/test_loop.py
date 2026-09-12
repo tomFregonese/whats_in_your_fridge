@@ -8,6 +8,7 @@ from openai.types.chat.chat_completion_message_function_tool_call import Functio
 from app.agent import loop
 from app.domain.allergy import Allergy
 from app.domain.equipment import Equipment
+from app.domain.fridge_input import SourcingMode
 from app.domain.suggestion import AllergyCheckStatus
 from app.services.exceptions import AgentResponseInvalidError
 
@@ -103,6 +104,22 @@ NEEDS_OVEN_PLATS_ARGS = json.dumps(
     }
 )
 
+NEEDS_SHOPPING_PLATS_ARGS = json.dumps(
+    {
+        "plats": [
+            {
+                "nom": "Lemon tart",
+                "description": "Needs a lemon the household doesn't have",
+                "portions": 4,
+                "ingredients": [{"nom": "lemon", "quantite": "2", "a_acheter": True}],
+                "etapes": ["Bake."],
+                "fridge_days": 3,
+            }
+        ],
+        "notes_generales": None,
+    }
+)
+
 VALID_PRECISION_ARGS = json.dumps({"question": "How many people?", "options": ["2", "4"]})
 
 VALID_IDEES_ARGS = json.dumps(
@@ -145,6 +162,7 @@ def _run(
     *,
     allergies: list[Allergy] | None = None,
     equipment: list[Equipment] | None = None,
+    sourcing_mode: SourcingMode = SourcingMode.FRIDGE_PLUS_SHOPPING,
     selected_dish_names: list[str] | None = None,
 ) -> loop.LoopResult:
     return loop.run(
@@ -153,6 +171,7 @@ def _run(
         messages=_messages(),
         allergies=allergies if allergies else [],
         equipment=equipment if equipment else [],
+        sourcing_mode=sourcing_mode,
         selected_dish_names=(
             selected_dish_names if selected_dish_names is not None else ["Carrot soup"]
         ),
@@ -336,6 +355,57 @@ def test_loop_drops_dish_that_keeps_needing_missing_equipment_after_all_retries(
     assert result.suggestions == []
     assert result.notes_generales is not None
     assert "Baked potato" in result.notes_generales
+    assert mock_complete.call_count == loop.MAX_ATTEMPTS
+
+
+# --- Sourcing check integration ---
+
+
+def test_loop_passes_through_shopping_dish_outside_fridge_only_mode() -> None:
+    message = _message(
+        tool_calls=[_tool_call("call_1", "proposer_plats", NEEDS_SHOPPING_PLATS_ARGS)]
+    )
+    with patch("app.agent.loop.client.complete_with_tools", return_value=message):
+        result = _run(
+            sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING, selected_dish_names=["Lemon tart"]
+        )
+
+    assert isinstance(result, loop.PlatsProposed)
+    assert result.suggestions[0].dish_name == "Lemon tart"
+
+
+def test_loop_regenerates_when_dish_needs_buying_something_in_fridge_only_mode() -> None:
+    bad = _message(
+        tool_calls=[_tool_call("call_1", "proposer_plats", NEEDS_SHOPPING_PLATS_ARGS)]
+    )
+    good = _message(tool_calls=[_tool_call("call_2", "proposer_plats", VALID_PLATS_ARGS)])
+    with patch(
+        "app.agent.loop.client.complete_with_tools", side_effect=[bad, good]
+    ) as mock_complete:
+        result = _run(sourcing_mode=SourcingMode.FRIDGE_ONLY, selected_dish_names=["Carrot soup"])
+
+    assert isinstance(result, loop.PlatsProposed)
+    assert result.suggestions[0].dish_name == "Carrot soup"
+    assert mock_complete.call_count == 2
+
+    final_messages = mock_complete.call_args_list[-1].kwargs["messages"]
+    tool_feedback = [m["content"] for m in final_messages if m.get("role") == "tool"]
+    assert any(fb and "lemon" in fb and "Lemon tart" in fb for fb in tool_feedback)
+
+
+def test_loop_drops_dish_that_keeps_needing_shopping_in_fridge_only_mode_after_all_retries() -> (
+    None
+):
+    bad = _message(
+        tool_calls=[_tool_call("call_1", "proposer_plats", NEEDS_SHOPPING_PLATS_ARGS)]
+    )
+    with patch("app.agent.loop.client.complete_with_tools", return_value=bad) as mock_complete:
+        result = _run(sourcing_mode=SourcingMode.FRIDGE_ONLY, selected_dish_names=["Lemon tart"])
+
+    assert isinstance(result, loop.PlatsProposed)
+    assert result.suggestions == []
+    assert result.notes_generales is not None
+    assert "Lemon tart" in result.notes_generales
     assert mock_complete.call_count == loop.MAX_ATTEMPTS
 
 
