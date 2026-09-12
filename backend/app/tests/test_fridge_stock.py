@@ -3,7 +3,12 @@ from typing import Any
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from httpx import Response
+
+# `starlette.testclient.TestClient` is built on `httpx2.Client` (its own
+# successor to `httpx`, see `starlette.testclient`'s import), so that's the
+# actual runtime — and static — type of what `client.post(...)` returns
+# below, not `httpx.Response`.
+from httpx2 import Response
 
 from app.agent.duplicate_check import DuplicateGroupArgs
 from app.agent.output_schema import DictatedItemArgs
@@ -223,7 +228,8 @@ def _add(client: TestClient, name: str, **kwargs: object) -> dict[str, Any]:
     body: dict[str, object] = {"ingredient_name": name, **kwargs}
     response = client.post("/api/fridge-stock", json=body)
     assert response.status_code == 201
-    return response.json()
+    result: dict[str, Any] = response.json()
+    return result
 
 
 def test_merge_suggestions_returns_a_suggestion_for_two_seeded_items(client: TestClient) -> None:

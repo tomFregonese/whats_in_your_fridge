@@ -1,6 +1,10 @@
+from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
-import httpx
+# The installed `openai` SDK's exceptions (`AuthenticationError`, etc.) now
+# type their `request`/`response` args as `httpx2`, its own successor to
+# `httpx`, so that's what these fixtures need to build.
+import httpx2 as httpx
 import openai
 import pytest
 
@@ -143,7 +147,7 @@ def _stream_that_raises(exc: Exception) -> object:
     returns an iterator without making the request), so this is the only
     way to exercise the failure path a stalled/dropped stream takes."""
 
-    def _gen():  # type: ignore[no-untyped-def]
+    def _gen() -> Iterator[object]:
         raise exc
         yield  # pragma: no cover - unreachable; makes this a generator
 
@@ -192,7 +196,9 @@ def test_stream_complete_with_tools_wraps_provider_error_event() -> None:
     # catch, this escaped as a raw SDK exception whose message ("Provider
     # returned error") then got shown to the user unexplained.
     sdk_error = openai.APIError(
-        message="Provider returned error", request=_REQUEST, body={"message": "Provider returned error"}
+        message="Provider returned error",
+        request=_REQUEST,
+        body={"message": "Provider returned error"},
     )
     mock_openai = _mock_client(return_value=_stream_that_raises(sdk_error))
     with (

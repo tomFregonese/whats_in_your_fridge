@@ -63,6 +63,7 @@ def test_connection(
     try:
         token = security_service.get_token()
         ok = agent_client.test_connection(token=token, model=dto.model_id)
-        return TestConnectionDtoOut(ok=ok, detail=None if ok else "OpenRouter rejected the request.")
+        detail = None if ok else "OpenRouter rejected the request."
+        return TestConnectionDtoOut(ok=ok, detail=detail)
     except Exception as exc:
         return TestConnectionDtoOut(ok=False, detail=str(exc))

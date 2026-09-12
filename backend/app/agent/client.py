@@ -11,6 +11,7 @@ and has no knowledge of the vault, the DB, or FastAPI's DI.
 """
 
 from collections.abc import Callable, Iterable
+from typing import Any
 
 from openai import (
     APIConnectionError,
@@ -23,8 +24,8 @@ from openai import (
 )
 from openai.types.chat import (
     ChatCompletionMessage,
+    ChatCompletionMessageFunctionToolCallParam,
     ChatCompletionMessageParam,
-    ChatCompletionToolMessageParam,
     ChatCompletionToolParam,
 )
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall
@@ -203,8 +204,7 @@ def stream_complete_with_tools(
         raise OpenRouterRequestError(f"OpenRouter rejected the request: {exc.message}") from exc
 
     collected_content: list[str] = []
-    tool_calls: dict[int, dict] = {}
-    finish_reason: str | None = None
+    tool_calls: dict[int, dict[str, Any]] = {}
 
     try:
         for chunk in stream:
@@ -212,7 +212,6 @@ def stream_complete_with_tools(
                 continue
 
             delta = chunk.choices[0].delta
-            finish_reason = chunk.choices[0].finish_reason
 
             # Reasoning tokens (OpenRouter / DeepSeek etc. via delta.reasoning)
             reasoning = getattr(delta, "reasoning", None)
@@ -290,15 +289,15 @@ def stream_complete_with_tools(
     content = "".join(collected_content) or None
 
     # Rebuild tool calls into the SDK's expected param format
-    rebuilt_tool_calls: list[ChatCompletionToolMessageParam] | None = None
+    rebuilt_tool_calls: list[ChatCompletionMessageFunctionToolCallParam] | None = None
     if tool_calls:
         rebuilt_tool_calls = []
         for idx in sorted(tool_calls):
-            tc = tool_calls[idx]
+            raw_call = tool_calls[idx]
             rebuilt_tool_calls.append({
-                "id": tc["id"],
+                "id": raw_call["id"],
                 "type": "function",
-                "function": tc["function"],
+                "function": raw_call["function"],
             })
 
     return ChatCompletionMessage(

@@ -134,7 +134,8 @@ class FridgeStockService:
             resolved = {name: resolve(name) for name in group.names}
             valid_names = sorted({name for name, item in resolved.items() if item is not None})
             for name_a, name_b in itertools.combinations(valid_names, 2):
-                pair_key = tuple(sorted((name_a.lower(), name_b.lower())))
+                lower_a, lower_b = name_a.lower(), name_b.lower()
+                pair_key = (lower_a, lower_b) if lower_a <= lower_b else (lower_b, lower_a)
                 if pair_key in seen_pairs:
                     continue
                 seen_pairs.add(pair_key)
