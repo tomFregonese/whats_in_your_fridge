@@ -14,7 +14,15 @@ class DishIdeaDtoOut(BaseModel):
     index: int
     dish_name: str
     description: str
+    leftover_of_dish_name: str | None = None
+    transformation_note: str | None = None
 
     @classmethod
     def from_domain(cls, index: int, idea: DishIdea) -> DishIdeaDtoOut:
-        return cls(index=index, dish_name=idea.dish_name, description=idea.description)
+        return cls(
+            index=index,
+            dish_name=idea.dish_name,
+            description=idea.description,
+            leftover_of_dish_name=idea.leftover_of_dish_name,
+            transformation_note=idea.transformation_note,
+        )

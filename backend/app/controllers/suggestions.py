@@ -13,6 +13,7 @@ from app.dependencies import (
     get_feedback_service,
     get_fridge_input_repository,
     get_fridge_stock_service,
+    get_meal_plan_service,
     get_security_service,
     get_settings_service,
     get_suggestion_repository,
@@ -29,6 +30,7 @@ from app.dto.suggestion_dto import (
     SelectDtoIn,
     SuggestionDtoOut,
     SuggestionsResultDtoOut,
+    SuggestionUpdateDtoIn,
 )
 from app.persistence.repositories.agent_run_repository import AgentRunRepository
 from app.persistence.repositories.allergy_repository import AllergyRepository
@@ -39,6 +41,7 @@ from app.security.service import SecurityService
 from app.services.exceptions import ModelNotConfiguredError, NotFoundError
 from app.services.feedback_service import FeedbackService
 from app.services.fridge_stock_service import FridgeStockService
+from app.services.meal_plan_service import MealPlanService
 from app.services.settings_service import SettingsService
 from app.services.suggestion_service import (
     ClarificationOutcome,
@@ -234,6 +237,25 @@ def select_stream(run_id: int, dto: SelectDtoIn) -> dict[str, str]:
         detail = f"No active streaming session for run {run_id}."
         raise HTTPException(status_code=404, detail=detail) from exc
     return {"status": "accepted"}
+
+
+@router.patch("/{suggestion_id}")
+def update_suggestion(
+    suggestion_id: int,
+    dto: SuggestionUpdateDtoIn,
+    service: MealPlanService = Depends(get_meal_plan_service),
+) -> SuggestionDtoOut:
+    """Backs the meal-plan table's inline edit (dish name, portions, and the
+    leftover-transformation note) — see `MealPlanService.update_suggestion`.
+    """
+    return SuggestionDtoOut.from_domain(
+        service.update_suggestion(
+            suggestion_id,
+            dish_name=dto.dish_name,
+            servings=dto.servings,
+            leftover_transformation=dto.leftover_transformation,
+        )
+    )
 
 
 @router.post("/{suggestion_id}/feedback", status_code=201)

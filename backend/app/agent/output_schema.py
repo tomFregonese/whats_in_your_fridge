@@ -10,8 +10,9 @@ we validate against never drift apart.
 from __future__ import annotations
 
 import json
+from typing import Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.domain.dish_idea import DishIdea
 from app.domain.suggestion import AllergyCheckStatus, Suggestion
@@ -66,6 +67,22 @@ class PlatArgs(BaseModel):
     freezer_friendly: bool = Field(
         default=False, description="Whether this dish freezes well for later."
     )
+    restes_de: str | None = Field(
+        default=None,
+        description="Nom exact d'un autre plat de ce même lot dont ce plat réutilise les "
+        "restes (laisser vide si ce plat est indépendant).",
+    )
+    transformation: str | None = Field(
+        default=None,
+        description="Courte description de la transformation appliquée aux restes "
+        "(ex: 'transformées en gratin au four'). Requis si `restes_de` est renseigné.",
+    )
+
+    @model_validator(mode="after")
+    def _transformation_required_with_restes_de(self) -> Self:
+        if self.restes_de and not (self.transformation and self.transformation.strip()):
+            raise ValueError("`transformation` is required when `restes_de` is set.")
+        return self
 
     def to_domain(
         self, *, allergy_check_status: AllergyCheckStatus = AllergyCheckStatus.OK
@@ -81,6 +98,12 @@ class PlatArgs(BaseModel):
         runs, so it's trusted as-is here. `fridge_days` is expected to have
         already been clamped to a sane range (see
         `agent/conservation_sanity_check.py`) by the time this runs.
+        `restes_de` is NOT mapped here — it names another dish in this same
+        batch by `dish_name`, and no real `Suggestion.id` exists for it yet
+        at this point (see `SuggestionService._run_recipes_phase`, which
+        resolves it into `leftover_of_suggestion_id` once the whole batch
+        is persisted). Only the human-readable `transformation` note is
+        kept directly.
         """
         ingredients = [
             {"nom": i.nom, "quantite": i.quantite, "a_acheter": i.a_acheter}
@@ -98,6 +121,7 @@ class PlatArgs(BaseModel):
             used_stock_item_ids_json=json.dumps(self.ingredients_stock_ids),
             fridge_days=self.fridge_days,
             freezer_friendly=self.freezer_friendly,
+            leftover_transformation=self.transformation,
         )
 
 
@@ -116,9 +140,30 @@ class IdeeArgs(BaseModel):
 
     nom: str = Field(min_length=1)
     description: str
+    restes_de: str | None = Field(
+        default=None,
+        description="Nom exact d'une idée précédente de cette même liste dont ce plat "
+        "réutilise les restes (laisser vide si ce plat est indépendant).",
+    )
+    transformation: str | None = Field(
+        default=None,
+        description="Courte description de la transformation appliquée aux restes "
+        "(ex: 'transformées en gratin au four'). Requis si `restes_de` est renseigné.",
+    )
+
+    @model_validator(mode="after")
+    def _transformation_required_with_restes_de(self) -> Self:
+        if self.restes_de and not (self.transformation and self.transformation.strip()):
+            raise ValueError("`transformation` is required when `restes_de` is set.")
+        return self
 
     def to_domain(self) -> DishIdea:
-        return DishIdea(dish_name=self.nom, description=self.description)
+        return DishIdea(
+            dish_name=self.nom,
+            description=self.description,
+            leftover_of_dish_name=self.restes_de,
+            transformation_note=self.transformation,
+        )
 
 
 class ProposerIdeesArgs(BaseModel):

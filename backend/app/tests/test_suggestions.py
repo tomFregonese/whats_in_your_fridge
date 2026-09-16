@@ -161,8 +161,20 @@ def test_create_suggestions_returns_ideas_proposed_result(client: TestClient) ->
     assert isinstance(body["fridge_input_id"], int)
     assert isinstance(body["run_id"], int)
     assert body["ideas"] == [
-        {"index": 0, "dish_name": "Carrot soup", "description": "Simple soup"},
-        {"index": 1, "dish_name": "Tomato soup", "description": "Another soup"},
+        {
+            "index": 0,
+            "dish_name": "Carrot soup",
+            "description": "Simple soup",
+            "leftover_of_dish_name": None,
+            "transformation_note": None,
+        },
+        {
+            "index": 1,
+            "dish_name": "Tomato soup",
+            "description": "Another soup",
+            "leftover_of_dish_name": None,
+            "transformation_note": None,
+        },
     ]
     assert body["notes_generales"] == "Pick one!"
     assert body["suggestions"] == []
@@ -476,3 +488,151 @@ def test_select_does_not_deduct_stock_items_the_recipe_did_not_report_using(
     assert response.json()["removed_stock_items"] == []
     remaining = client.get("/api/fridge-stock").json()
     assert [item["id"] for item in remaining] == [stock_id]
+
+
+# --- Leftover-transformation chain ---
+
+
+def _plats_proposed_with_leftover_link() -> loop.PlatsProposed:
+    result = _plats_proposed()
+    gratin = Suggestion(
+        id=None,
+        meal_plan_id=None,
+        dish_name="Pasta gratin",
+        description="Baked pasta with cheese",
+        ingredients_json='["pasta leftovers", "cheese"]',
+        steps_json='["Mix.", "Bake."]',
+        servings=4,
+        allergy_check_status=AllergyCheckStatus.OK,
+    )
+    result.suggestions.append(gratin)
+    result.leftover_links = [
+        loop.LeftoverLink(
+            dish_name="Pasta gratin",
+            leftover_of_dish_name="Carrot soup",
+            transformation="Baked with cheese",
+        )
+    ]
+    return result
+
+
+def test_select_persists_the_leftover_link_between_dishes(client: TestClient) -> None:
+    run_id = _propose_ideas(client)
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch(
+            "app.services.suggestion_service.loop.run",
+            return_value=_plats_proposed_with_leftover_link(),
+        ),
+    ):
+        response = client.post(
+            f"/api/suggestions/runs/{run_id}/select", json={"selected_indexes": [0]}
+        )
+
+    body = response.json()
+    by_name = {s["dish_name"]: s for s in body["suggestions"]}
+    carrot_soup_id = by_name["Carrot soup"]["id"]
+    assert by_name["Pasta gratin"]["leftover_of_suggestion_id"] == carrot_soup_id
+    assert by_name["Pasta gratin"]["leftover_transformation"] == "Baked with cheese"
+    assert by_name["Carrot soup"]["leftover_of_suggestion_id"] is None
+
+    # Persisted, not just present on the response of the generating call.
+    meal_plan_id = body["meal_plan_id"]
+    detail = client.get(f"/api/meal-plans/{meal_plan_id}").json()
+    persisted_by_name = {s["dish_name"]: s for s in detail["suggestions"]}
+    assert persisted_by_name["Pasta gratin"]["leftover_of_suggestion_id"] == carrot_soup_id
+
+
+def test_select_drops_an_unresolvable_leftover_link_silently(client: TestClient) -> None:
+    run_id = _propose_ideas(client)
+    result = _plats_proposed()
+    result.leftover_links = [
+        loop.LeftoverLink(
+            dish_name="Carrot soup",
+            leftover_of_dish_name="Some dish that was never proposed",
+            transformation="???",
+        )
+    ]
+
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run", return_value=result),
+    ):
+        response = client.post(
+            f"/api/suggestions/runs/{run_id}/select", json={"selected_indexes": [0]}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["suggestions"][0]["leftover_of_suggestion_id"] is None
+
+
+# --- Suggestion update (table edit) ---
+
+
+def _select_one_dish(client: TestClient) -> dict[str, object]:
+    run_id = _propose_ideas(client)
+    with (
+        patch("app.services.suggestion_service.is_model_available", return_value=True),
+        patch("app.services.suggestion_service.loop.run", return_value=_plats_proposed()),
+    ):
+        response = client.post(
+            f"/api/suggestions/runs/{run_id}/select", json={"selected_indexes": [0]}
+        )
+    result: dict[str, object] = response.json()
+    return result
+
+
+def test_update_suggestion_edits_dish_name_servings_and_leftover_note(
+    client: TestClient,
+) -> None:
+    selected = _select_one_dish(client)
+    suggestion_id = selected["suggestions"][0]["id"]  # type: ignore[index]
+
+    response = client.patch(
+        f"/api/suggestions/{suggestion_id}",
+        json={
+            "dish_name": "Carrot & ginger soup",
+            "servings": 6,
+            "leftover_transformation": "Blended smoother the next day",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dish_name"] == "Carrot & ginger soup"
+    assert body["servings"] == 6
+    assert body["leftover_transformation"] == "Blended smoother the next day"
+
+    meal_plan_id = selected["meal_plan_id"]
+    detail = client.get(f"/api/meal-plans/{meal_plan_id}").json()
+    assert detail["suggestions"][0]["dish_name"] == "Carrot & ginger soup"
+    assert detail["suggestions"][0]["servings"] == 6
+
+
+def test_update_suggestion_with_unknown_id_returns_404(client: TestClient) -> None:
+    response = client.patch("/api/suggestions/999", json={"dish_name": "X", "servings": 1})
+
+    assert response.status_code == 404
+
+
+def test_update_suggestion_rejects_blank_dish_name(client: TestClient) -> None:
+    selected = _select_one_dish(client)
+    suggestion_id = selected["suggestions"][0]["id"]  # type: ignore[index]
+
+    response = client.patch(
+        f"/api/suggestions/{suggestion_id}", json={"dish_name": "", "servings": 4}
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_suggestion_rejects_non_positive_servings(client: TestClient) -> None:
+    selected = _select_one_dish(client)
+    suggestion_id = selected["suggestions"][0]["id"]  # type: ignore[index]
+
+    response = client.patch(
+        f"/api/suggestions/{suggestion_id}", json={"dish_name": "Soup", "servings": 0}
+    )
+
+    assert response.status_code == 422

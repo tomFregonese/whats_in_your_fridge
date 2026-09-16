@@ -29,7 +29,7 @@ changing this loop's shape).
 import json
 from collections.abc import Callable
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from openai.types.chat import (
@@ -79,9 +79,23 @@ class ClarificationNeeded:
 
 
 @dataclass
+class LeftoverLink:
+    """One `PlatArgs.restes_de`/`transformation` pair, captured by name
+    while the dishes it refers to still only exist as `PlatArgs` — no real
+    `Suggestion.id` exists yet at this point (see
+    `services/suggestion_service.py::resolve_leftover_links`, which
+    resolves this into a real FK once the whole batch is persisted)."""
+
+    dish_name: str
+    leftover_of_dish_name: str
+    transformation: str
+
+
+@dataclass
 class PlatsProposed:
     suggestions: list[Suggestion]
     notes_generales: str | None
+    leftover_links: list[LeftoverLink] = field(default_factory=list)
 
 
 @dataclass
@@ -197,6 +211,7 @@ def run(
                             for plat in safe_plats
                         ],
                         notes_generales=note,
+                        leftover_links=_leftover_links_from_plats(safe_plats),
                     )
                 working_messages.append(
                     _tool_error_message(
@@ -219,6 +234,7 @@ def run(
             return PlatsProposed(
                 suggestions=[plat.to_domain(allergy_check_status=status) for plat in safe_plats],
                 notes_generales=plats_args.notes_generales,
+                leftover_links=_leftover_links_from_plats(safe_plats),
             )
 
         working_messages.append(_assistant_message(tool_call_param))
@@ -402,6 +418,7 @@ def stream_run(
                             for plat in safe_plats
                         ],
                         notes_generales=note,
+                        leftover_links=_leftover_links_from_plats(safe_plats),
                     )
                 working_messages.append(
                     _tool_error_message(
@@ -424,6 +441,7 @@ def stream_run(
             return PlatsProposed(
                 suggestions=[plat.to_domain(allergy_check_status=status) for plat in safe_plats],
                 notes_generales=plats_args.notes_generales,
+                leftover_links=_leftover_links_from_plats(safe_plats),
             )
 
         working_messages.append(_assistant_message(tool_call_param))
@@ -565,6 +583,18 @@ def _selection_mismatch_message(selected_dish_names: list[str]) -> str:
         f"The user selected exactly these dishes: {names}. Call `proposer_plats` again "
         "with the full recipe for exactly these dishes, in this order, and no others."
     )
+
+
+def _leftover_links_from_plats(plats: list[PlatArgs]) -> list[LeftoverLink]:
+    return [
+        LeftoverLink(
+            dish_name=plat.nom,
+            leftover_of_dish_name=plat.restes_de,
+            transformation=plat.transformation or "",
+        )
+        for plat in plats
+        if plat.restes_de
+    ]
 
 
 def _dropped_note(existing_note: str | None, dropped_names: list[str]) -> str | None:

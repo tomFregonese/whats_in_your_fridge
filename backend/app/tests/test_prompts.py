@@ -5,6 +5,7 @@ import pytest
 from app.agent import prompts
 from app.domain.agent_run import AgentRunPhase
 from app.domain.allergy import Allergy
+from app.domain.dish_idea import DishIdea
 from app.domain.equipment import Equipment
 from app.domain.fridge_input import FridgeInput, FridgeInputItem, FridgeInputMode, SourcingMode
 from app.domain.preference_note import PreferenceNote, PreferenceSource
@@ -319,6 +320,56 @@ def test_user_message_includes_structured_items() -> None:
     assert "batch" in message
     assert "carrot" in message
     assert "3" in message
+
+
+def test_ideas_phase_batch_hint_requires_restes_de_field() -> None:
+    prompt = prompts.build_system_prompt(
+        default_servings=4,
+        allergies=[],
+        equipment=[],
+        preferences=[],
+        sourcing_mode=SourcingMode.FRIDGE_PLUS_SHOPPING,
+        phase=AgentRunPhase.IDEAS,
+        mode=FridgeInputMode.BATCH,
+        days=5,
+    )
+
+    assert "restes_de" in prompt
+    assert "NEVER" in prompt
+
+
+# --- build_selection_message ---
+
+
+def test_build_selection_message_names_every_selected_dish() -> None:
+    selected = [
+        DishIdea(dish_name="Carrot soup", description="Simple soup"),
+        DishIdea(dish_name="Tomato soup", description="Another soup"),
+    ]
+
+    message = prompts.build_selection_message(selected)
+
+    assert '"Carrot soup"' in message
+    assert '"Tomato soup"' in message
+    assert "proposer_plats" in message
+
+
+def test_build_selection_message_restates_the_leftover_link() -> None:
+    selected = [
+        DishIdea(dish_name="Pasta", description="Big batch"),
+        DishIdea(
+            dish_name="Pasta gratin",
+            description="Baked leftovers",
+            leftover_of_dish_name="Pasta",
+            transformation_note="Baked with cheese",
+        ),
+    ]
+
+    message = prompts.build_selection_message(selected)
+
+    assert 'reuses the leftovers of "Pasta"' in message
+    assert "Baked with cheese" in message
+    assert "restes_de" in message
 
 
 def test_user_message_includes_free_text() -> None:

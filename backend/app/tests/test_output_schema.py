@@ -48,6 +48,60 @@ def test_idee_args_to_domain() -> None:
 
     assert dish_idea.dish_name == "Carrot soup"
     assert dish_idea.description == "Simple soup"
+    assert dish_idea.leftover_of_dish_name is None
+    assert dish_idea.transformation_note is None
+
+
+def test_idee_args_to_domain_carries_the_leftover_link() -> None:
+    idee = IdeeArgs(
+        nom="Pasta gratin",
+        description="Baked leftovers",
+        restes_de="Pasta",
+        transformation="Baked with cheese",
+    )
+
+    dish_idea = idee.to_domain()
+
+    assert dish_idea.leftover_of_dish_name == "Pasta"
+    assert dish_idea.transformation_note == "Baked with cheese"
+
+
+def test_idee_args_restes_de_requires_a_transformation() -> None:
+    with pytest.raises(ValidationError):
+        IdeeArgs(nom="Pasta gratin", description="Baked leftovers", restes_de="Pasta")
+
+
+def test_plat_args_restes_de_requires_a_transformation() -> None:
+    with pytest.raises(ValidationError):
+        PlatArgs(
+            nom="Pasta gratin",
+            description="Baked leftovers",
+            portions=4,
+            ingredients=[PlatIngredient(nom="pasta")],
+            etapes=["Bake."],
+            fridge_days=3,
+            restes_de="Pasta",
+        )
+
+
+def test_plat_args_to_domain_carries_the_transformation_note() -> None:
+    plat = PlatArgs(
+        nom="Pasta gratin",
+        description="Baked leftovers",
+        portions=4,
+        ingredients=[PlatIngredient(nom="pasta")],
+        etapes=["Bake."],
+        fridge_days=3,
+        restes_de="Pasta",
+        transformation="Baked with cheese",
+    )
+
+    suggestion = plat.to_domain()
+
+    assert suggestion.leftover_transformation == "Baked with cheese"
+    # `restes_de` is never mapped onto the domain object directly — no real
+    # id exists for it yet (see `SuggestionService._run_recipes_phase`).
+    assert suggestion.leftover_of_suggestion_id is None
 
 
 def test_proposer_idees_args_requires_at_least_one_idee() -> None:

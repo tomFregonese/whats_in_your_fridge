@@ -3,14 +3,14 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { addFridgeStockItem } from "../api/fridgeStock";
 import type { MealPlan } from "../api/mealPlans";
 import { getMealPlan } from "../api/mealPlans";
-import type { RemovedStockItem } from "../api/suggestions";
+import type { RemovedStockItem, Suggestion } from "../api/suggestions";
 import { AppLayout } from "../components/AppLayout";
-import { MealAgenda } from "../components/MealAgenda";
+import { MealPlanTable } from "../components/MealPlanTable";
+import { ShoppingList } from "../components/ShoppingList";
 import { SingleDish } from "../components/SingleDish";
-import { WeekPlan } from "../components/WeekPlan";
 
-/** Routed at `/plan/:id`. Backs both `WeekPlan` (batch) and `SingleDish`
- * (single) — branches on the persisted plan's `mode`.
+/** Routed at `/plan/:id`. Backs both `MealPlanTable` (batch) and
+ * `SingleDish` (single) — branches on the persisted plan's `mode`.
  *
  * Reached either right after a generation completes (`FridgeInputForm`
  * navigates here and passes the fresh `notes_generales`/`removedStockItems`
@@ -77,10 +77,21 @@ export function MealPlanPage() {
     setRemovedStockItems((prev) => prev.filter((i) => i.id !== item.id));
   }
 
+  function handleSuggestionUpdated(updated: Suggestion): void {
+    setMealPlan((prev) =>
+      prev
+        ? {
+            ...prev,
+            suggestions: prev.suggestions.map((s) => (s.id === updated.id ? updated : s)),
+          }
+        : prev,
+    );
+  }
+
   return (
     <AppLayout>
       {removedStockItems.length > 0 && (
-        <div className="card">
+        <div className="card no-print">
           <div className="card-header">
             <h2>🧊 Updated your fridge</h2>
           </div>
@@ -107,16 +118,27 @@ export function MealPlanPage() {
         </div>
       )}
 
-      {mealPlan.agenda.length > 0 && (
-        <MealAgenda agenda={mealPlan.agenda} suggestions={mealPlan.suggestions} />
-      )}
-
       {mealPlan.mode === "single" ? (
         <SingleDish suggestions={mealPlan.suggestions} notesGenerales={notesGenerales} />
       ) : (
-        <WeekPlan suggestions={mealPlan.suggestions} notesGenerales={notesGenerales} />
+        <>
+          <div className="page-header">
+            <h1>Your week's plan</h1>
+            <p>
+              {mealPlan.suggestions.length} dish{mealPlan.suggestions.length === 1 ? "" : "es"} to
+              batch-cook.
+            </p>
+            {notesGenerales && <p className="plan-notes">{notesGenerales}</p>}
+          </div>
+          <ShoppingList suggestions={mealPlan.suggestions} />
+          <MealPlanTable
+            suggestions={mealPlan.suggestions}
+            agenda={mealPlan.agenda}
+            onSuggestionUpdated={handleSuggestionUpdated}
+          />
+        </>
       )}
-      <Link to="/" className="btn btn-secondary">
+      <Link to="/" className="btn btn-secondary no-print">
         ← Start over
       </Link>
     </AppLayout>

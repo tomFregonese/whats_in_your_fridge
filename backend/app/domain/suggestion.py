@@ -54,6 +54,19 @@ class Suggestion:
     freezer_friendly: bool = False
     """Whether this dish freezes well — self-reported by the LLM. Also
     feeds `services/meal_agenda_service.py`."""
+    leftover_of_suggestion_id: int | None = None
+    """Self-referential FK to another `Suggestion` in the same `meal_plan`
+    whose leftovers this dish transforms. The LLM only ever names its
+    source dish by `dish_name` (see `PlatArgs.restes_de`) — since no id
+    exists yet while it's writing that — so this is resolved from that name
+    by `SuggestionService._run_recipes_phase` right after the whole batch
+    is persisted and real ids exist. Stays `None` for a standalone dish or
+    when the LLM's reference didn't match any dish in the batch."""
+    leftover_transformation: str | None = None
+    """Human-readable note of how the leftovers were transformed (from
+    `PlatArgs.transformation`) — kept even in the rare case
+    `leftover_of_suggestion_id` couldn't be resolved, so the information
+    isn't silently lost."""
 
 
 @dataclass

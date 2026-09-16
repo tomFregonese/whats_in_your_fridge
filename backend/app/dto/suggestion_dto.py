@@ -48,6 +48,8 @@ class SuggestionDtoOut(BaseModel):
     servings: int
     fridge_days: int
     freezer_friendly: bool
+    leftover_of_suggestion_id: int | None = None
+    leftover_transformation: str | None = None
 
     @classmethod
     def from_domain(cls, suggestion: Suggestion) -> SuggestionDtoOut:
@@ -61,6 +63,8 @@ class SuggestionDtoOut(BaseModel):
             servings=suggestion.servings,
             fridge_days=suggestion.fridge_days,
             freezer_friendly=suggestion.freezer_friendly,
+            leftover_of_suggestion_id=suggestion.leftover_of_suggestion_id,
+            leftover_transformation=suggestion.leftover_transformation,
         )
 
 
@@ -122,6 +126,18 @@ class SuggestionsResultDtoOut(BaseModel):
     run_id: int | None = None
     question: str | None = None
     options: list[str] | None = None
+
+
+class SuggestionUpdateDtoIn(BaseModel):
+    """Full-replace edit of a persisted `Suggestion`'s user-facing fields —
+    same "whole editable surface, not a deep partial patch" convention as
+    `FridgeStockItemDtoIn`. Re-pointing which dish this one is a leftover
+    of is deliberately out of scope for V1 — only the free-text note is
+    editable here."""
+
+    dish_name: str = Field(min_length=1)
+    servings: int = Field(gt=0)
+    leftover_transformation: str | None = None
 
 
 class RespondDtoIn(BaseModel):

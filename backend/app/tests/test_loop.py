@@ -120,6 +120,32 @@ NEEDS_SHOPPING_PLATS_ARGS = json.dumps(
     }
 )
 
+PLATS_ARGS_WITH_LEFTOVER_LINK = json.dumps(
+    {
+        "plats": [
+            {
+                "nom": "Pasta",
+                "description": "Big batch",
+                "portions": 4,
+                "ingredients": [{"nom": "pasta", "quantite": "500g"}],
+                "etapes": ["Boil."],
+                "fridge_days": 3,
+            },
+            {
+                "nom": "Pasta gratin",
+                "description": "Baked leftovers",
+                "portions": 4,
+                "ingredients": [{"nom": "pasta leftovers"}, {"nom": "cheese"}],
+                "etapes": ["Mix.", "Bake."],
+                "fridge_days": 3,
+                "restes_de": "Pasta",
+                "transformation": "Baked with cheese",
+            },
+        ],
+        "notes_generales": None,
+    }
+)
+
 VALID_PRECISION_ARGS = json.dumps({"question": "How many people?", "options": ["2", "4"]})
 
 VALID_IDEES_ARGS = json.dumps(
@@ -407,6 +433,35 @@ def test_loop_drops_dish_that_keeps_needing_shopping_in_fridge_only_mode_after_a
     assert result.notes_generales is not None
     assert "Lemon tart" in result.notes_generales
     assert mock_complete.call_count == loop.MAX_ATTEMPTS
+
+
+# --- Leftover-transformation link capture ---
+
+
+def test_loop_captures_the_leftover_link_between_selected_dishes() -> None:
+    message = _message(
+        tool_calls=[_tool_call("call_1", "proposer_plats", PLATS_ARGS_WITH_LEFTOVER_LINK)]
+    )
+    with patch("app.agent.loop.client.complete_with_tools", return_value=message):
+        result = _run(selected_dish_names=["Pasta", "Pasta gratin"])
+
+    assert isinstance(result, loop.PlatsProposed)
+    assert result.leftover_links == [
+        loop.LeftoverLink(
+            dish_name="Pasta gratin",
+            leftover_of_dish_name="Pasta",
+            transformation="Baked with cheese",
+        )
+    ]
+
+
+def test_loop_leftover_links_empty_when_no_dish_reuses_another() -> None:
+    message = _message(tool_calls=[_tool_call("call_1", "proposer_plats", VALID_PLATS_ARGS)])
+    with patch("app.agent.loop.client.complete_with_tools", return_value=message):
+        result = _run()
+
+    assert isinstance(result, loop.PlatsProposed)
+    assert result.leftover_links == []
 
 
 # --- Selection-match validation (two-phase dish selection) ---

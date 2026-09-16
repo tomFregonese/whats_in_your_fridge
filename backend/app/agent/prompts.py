@@ -16,6 +16,7 @@ system prompt.
 
 from app.domain.agent_run import AgentRunPhase
 from app.domain.allergy import Allergy
+from app.domain.dish_idea import DishIdea
 from app.domain.equipment import Equipment
 from app.domain.fridge_input import (
     FridgeInput,
@@ -99,11 +100,17 @@ def build_system_prompt(
         if mode == FridgeInputMode.BATCH and days is not None and days > 1:
             lines.append(
                 "This is a batch-cooking session for "
-                f"{days} day(s): favor ideas that reuse one cooking effort across several "
-                "presentations over the following days, e.g. a big pot of pasta eaten hot "
-                "the same evening, as a cold pasta salad the next day, then as a pasta "
-                "gratin the day after — mention this kind of reuse explicitly in the "
-                "description when it applies."
+                f"{days} day(s). NEVER plan to eat the exact same dish, unchanged, on more "
+                "than one day — eating identical leftovers day after day is not acceptable. "
+                "When one cooking effort is meant to cover several days, propose a separate "
+                "idea for each day's presentation, each genuinely different (a big pot of "
+                "pasta eaten hot the same evening, a cold pasta salad the next day, a pasta "
+                "gratin the day after — never the same pasta served the same way twice). "
+                "For each such follow-up idea, set `restes_de` to the exact `nom` of the "
+                "earlier idea in this same list whose leftovers it reuses, and "
+                "`transformation` to a short description of what changes about it. Chaining "
+                "reuse across more than two days (e.g. pasta → pasta salad → pasta gratin) "
+                "is encouraged when it fits."
             )
     else:
         lines.append(
@@ -128,6 +135,14 @@ def build_system_prompt(
             "cooking), and `freezer_friendly` (whether it freezes well). For each "
             "ingredient, set `a_acheter` to true if it's not in the fridge contents or the "
             "pantry staples and the household would need to buy it."
+        )
+        lines.append(
+            "If the preceding tool result says a dish reuses another selected dish's "
+            "leftovers, restate that on `proposer_plats`: set `restes_de` to the exact "
+            "`nom` of that other dish as it appears in this same call, and `transformation` "
+            "to how the leftovers are turned into this dish — never invent a leftover link "
+            "that wasn't given to you, and never point `restes_de` at a dish outside this "
+            "same selection."
         )
 
     return "\n".join(lines)
@@ -159,9 +174,11 @@ def _idea_count_hint(mode: FridgeInputMode, days: int | None) -> str:
     if mode == FridgeInputMode.BATCH:
         if days is not None:
             return (
-                f"enough distinct dish ideas to cover {days} day(s) of batch cooking "
-                "(fewer than that is fine when some ideas are meant to be eaten as "
-                "leftovers across several of those days)"
+                f"enough distinct dish ideas or leftover presentations to cover all "
+                f"{days} day(s) of batch cooking — never fewer than {days}, since each day "
+                "needs either a new dish or a genuinely different presentation of a "
+                "previous day's leftovers (see `restes_de` below), never the same dish "
+                "repeated as-is"
             )
         return "6 to 8 distinct dish ideas, enough variety for a week of batch cooking"
     return "3 to 4 distinct dish ideas for a single meal"
@@ -178,6 +195,34 @@ def build_user_message(fridge_input: FridgeInput) -> str:
         parts.append(f"Additional notes from the user: {fridge_input.free_text}")
 
     return "\n\n".join(parts)
+
+
+def build_selection_message(selected: list[DishIdea]) -> str:
+    """Tool-result content resuming a pending `proposer_idees` call once the
+    user has picked, forcing the model straight into `proposer_plats` for
+    exactly those dishes — shared by `SuggestionService.select()` and
+    `streaming_service.py`'s background thread (previously built ad hoc,
+    near-identically, in both places).
+
+    Also reminds the model of any leftover chain among the picks (see
+    `DishIdea.leftover_of_dish_name`) — once `select()` resumes the
+    conversation, the picked ideas are the only place that link still
+    lives, so it has to be restated here for the model to carry it over
+    onto `PlatArgs.restes_de`/`transformation`.
+    """
+    names = ", ".join(f'"{idea.dish_name}"' for idea in selected)
+    lines = [
+        f"The user selected: {names}. Call `proposer_plats` now with the full recipe for "
+        "exactly these dishes, in this order, and no others."
+    ]
+    for idea in selected:
+        if idea.leftover_of_dish_name:
+            note = f" ({idea.transformation_note})" if idea.transformation_note else ""
+            lines.append(
+                f'"{idea.dish_name}" reuses the leftovers of "{idea.leftover_of_dish_name}"'
+                f"{note} — set `restes_de`/`transformation` on `proposer_plats` accordingly."
+            )
+    return " ".join(lines)
 
 
 def _format_item(item: FridgeInputItem) -> str:

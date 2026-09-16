@@ -60,6 +60,12 @@ export function DishIdeaSelector({ ideas, mode, submitting, onConfirm }: DishIde
                 <span className="idea-picker-text">
                   <span className="idea-name">{idea.dish_name}</span>
                   <span className="idea-description">{idea.description}</span>
+                  {idea.leftover_of_dish_name && (
+                    <span className="badge badge-neutral idea-leftover-badge">
+                      ♻️ reuses "{idea.leftover_of_dish_name}"
+                      {idea.transformation_note && ` — ${idea.transformation_note}`}
+                    </span>
+                  )}
                 </span>
               </label>
             </li>

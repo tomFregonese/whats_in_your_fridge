@@ -15,3 +15,11 @@ class DishIdea:
 
     dish_name: str
     description: str
+    leftover_of_dish_name: str | None = None
+    """Exact `dish_name` of another idea in the same shortlist whose
+    leftovers this one reuses — see `agent/output_schema.py::IdeeArgs.restes_de`.
+    `None` for a standalone idea."""
+    transformation_note: str | None = None
+    """How the leftovers are transformed into this dish (e.g. "turned into
+    a gratin") — see `agent/output_schema.py::IdeeArgs.transformation`. Set
+    whenever `leftover_of_dish_name` is."""

@@ -1,8 +1,11 @@
 import type { Suggestion } from "../api/suggestions";
+import { DishRecipeDetail } from "./DishRecipeDetail";
 import { FeedbackForm } from "./FeedbackForm";
 
-/** One proposed dish — shared by `WeekPlan` (one per dish) and `SingleDish`
- * (usually just one, but stays a list to match the backend's shape). */
+/** One proposed dish — used by `SingleDish` (usually just one dish, but
+ * stays a list to match the backend's shape). Batch-mode plans render
+ * through `MealPlanTable` instead, which shares `DishRecipeDetail` with
+ * this component for the recipe body. */
 export function DishCard({ dish }: { dish: Suggestion }) {
   return (
     <div className="card">
@@ -17,29 +20,7 @@ export function DishCard({ dish }: { dish: Suggestion }) {
         {dish.freezer_friendly && <span className="badge badge-neutral">❄️ freezer-friendly</span>}
       </div>
 
-      <div className="field">
-        <span className="field-label">Ingredients</span>
-        <ul className="tag-list">
-          {dish.ingredients.map((ingredient) => (
-            <li key={ingredient.name}>
-              <span>
-                {ingredient.name}
-                {ingredient.quantity && ` (${ingredient.quantity})`}
-              </span>
-              {ingredient.to_buy && <span className="badge badge-warning">🛒 to buy</span>}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="field">
-        <span className="field-label">Steps</span>
-        <ol className="steps-list">
-          {dish.steps.map((step) => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
-      </div>
+      <DishRecipeDetail dish={dish} />
 
       <FeedbackForm suggestionId={dish.id} />
     </div>

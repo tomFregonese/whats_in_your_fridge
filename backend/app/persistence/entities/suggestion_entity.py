@@ -57,6 +57,8 @@ class SuggestionEntity(SQLModel, table=True):
     used_stock_item_ids_json: str = "[]"
     fridge_days: int = 3
     freezer_friendly: bool = False
+    leftover_of_suggestion_id: int | None = Field(default=None, foreign_key="suggestion.id")
+    leftover_transformation: str | None = None
 
     def to_domain(self) -> Suggestion:
         return Suggestion(
@@ -71,6 +73,8 @@ class SuggestionEntity(SQLModel, table=True):
             used_stock_item_ids_json=self.used_stock_item_ids_json,
             fridge_days=self.fridge_days,
             freezer_friendly=self.freezer_friendly,
+            leftover_of_suggestion_id=self.leftover_of_suggestion_id,
+            leftover_transformation=self.leftover_transformation,
         )
 
     @classmethod
@@ -89,6 +93,8 @@ class SuggestionEntity(SQLModel, table=True):
             used_stock_item_ids_json=suggestion.used_stock_item_ids_json,
             fridge_days=suggestion.fridge_days,
             freezer_friendly=suggestion.freezer_friendly,
+            leftover_of_suggestion_id=suggestion.leftover_of_suggestion_id,
+            leftover_transformation=suggestion.leftover_transformation,
         )
 
 

@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: d3aa8367395f
+Revision ID: 9a5626d3e895
 Revises: 
-Create Date: 2026-08-26 15:32:46.031868
+Create Date: 2026-09-16 15:07:41.556663
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'd3aa8367395f'
+revision: str = '9a5626d3e895'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -29,13 +29,42 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_allergy_ingredient_name'), 'allergy', ['ingredient_name'], unique=False)
+    op.create_table('equipment',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_equipment_name'), 'equipment', ['name'], unique=False)
     op.create_table('fridge_input',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('mode', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('sourcing_mode', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('free_text', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('days', sa.Integer(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('fridge_stock_item',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('ingredient_name', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('quantity_value', sa.Float(), nullable=True),
+    sa.Column('quantity_unit', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+    sa.Column('quantity_raw', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_fridge_stock_item_ingredient_name'), 'fridge_stock_item', ['ingredient_name'], unique=False)
+    op.create_table('merge_dismissal',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name_a', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('name_b', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('name_a', 'name_b', name='uq_merge_dismissal_pair')
+    )
+    op.create_index(op.f('ix_merge_dismissal_name_a'), 'merge_dismissal', ['name_a'], unique=False)
+    op.create_index(op.f('ix_merge_dismissal_name_b'), 'merge_dismissal', ['name_b'], unique=False)
     op.create_table('preference_note',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('content', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
@@ -50,6 +79,7 @@ def upgrade() -> None:
     sa.Column('openrouter_model_id', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('freezer_capacity_slots', sa.Integer(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('vault',
@@ -65,8 +95,10 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('fridge_input_id', sa.Integer(), nullable=False),
     sa.Column('status', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('phase', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('messages_json', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('pending_question', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+    sa.Column('proposed_ideas_json', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.ForeignKeyConstraint(['fridge_input_id'], ['fridge_input.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -78,10 +110,13 @@ def upgrade() -> None:
     sa.Column('quantity_value', sa.Float(), nullable=True),
     sa.Column('quantity_unit', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('quantity_raw', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+    sa.Column('fridge_stock_item_id', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['fridge_input_id'], ['fridge_input.id'], ),
+    sa.ForeignKeyConstraint(['fridge_stock_item_id'], ['fridge_stock_item.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_fridge_input_item_fridge_input_id'), 'fridge_input_item', ['fridge_input_id'], unique=False)
+    op.create_index(op.f('ix_fridge_input_item_fridge_stock_item_id'), 'fridge_input_item', ['fridge_stock_item_id'], unique=False)
     op.create_table('meal_plan',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('fridge_input_id', sa.Integer(), nullable=False),
@@ -101,6 +136,12 @@ def upgrade() -> None:
     sa.Column('steps_json', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('servings', sa.Integer(), nullable=False),
     sa.Column('allergy_check_status', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('used_stock_item_ids_json', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('fridge_days', sa.Integer(), nullable=False),
+    sa.Column('freezer_friendly', sa.Boolean(), nullable=False),
+    sa.Column('leftover_of_suggestion_id', sa.Integer(), nullable=True),
+    sa.Column('leftover_transformation', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+    sa.ForeignKeyConstraint(['leftover_of_suggestion_id'], ['suggestion.id'], ),
     sa.ForeignKeyConstraint(['meal_plan_id'], ['meal_plan.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -114,18 +155,33 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('suggestion_id')
     )
+    op.create_table('meal_plan_agenda_entry',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('meal_plan_id', sa.Integer(), nullable=False),
+    sa.Column('day_index', sa.Integer(), nullable=False),
+    sa.Column('suggestion_id', sa.Integer(), nullable=False),
+    sa.Column('storage', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('warning', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+    sa.ForeignKeyConstraint(['meal_plan_id'], ['meal_plan.id'], ),
+    sa.ForeignKeyConstraint(['suggestion_id'], ['suggestion.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_meal_plan_agenda_entry_meal_plan_id'), 'meal_plan_agenda_entry', ['meal_plan_id'], unique=False)
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index(op.f('ix_meal_plan_agenda_entry_meal_plan_id'), table_name='meal_plan_agenda_entry')
+    op.drop_table('meal_plan_agenda_entry')
     op.drop_table('feedback')
     op.drop_index(op.f('ix_suggestion_meal_plan_id'), table_name='suggestion')
     op.drop_table('suggestion')
     op.drop_index(op.f('ix_meal_plan_fridge_input_id'), table_name='meal_plan')
     op.drop_index(op.f('ix_meal_plan_created_at'), table_name='meal_plan')
     op.drop_table('meal_plan')
+    op.drop_index(op.f('ix_fridge_input_item_fridge_stock_item_id'), table_name='fridge_input_item')
     op.drop_index(op.f('ix_fridge_input_item_fridge_input_id'), table_name='fridge_input_item')
     op.drop_table('fridge_input_item')
     op.drop_index(op.f('ix_agent_run_fridge_input_id'), table_name='agent_run')
@@ -134,7 +190,14 @@ def downgrade() -> None:
     op.drop_table('settings')
     op.drop_index(op.f('ix_preference_note_created_at'), table_name='preference_note')
     op.drop_table('preference_note')
+    op.drop_index(op.f('ix_merge_dismissal_name_b'), table_name='merge_dismissal')
+    op.drop_index(op.f('ix_merge_dismissal_name_a'), table_name='merge_dismissal')
+    op.drop_table('merge_dismissal')
+    op.drop_index(op.f('ix_fridge_stock_item_ingredient_name'), table_name='fridge_stock_item')
+    op.drop_table('fridge_stock_item')
     op.drop_table('fridge_input')
+    op.drop_index(op.f('ix_equipment_name'), table_name='equipment')
+    op.drop_table('equipment')
     op.drop_index(op.f('ix_allergy_ingredient_name'), table_name='allergy')
     op.drop_table('allergy')
     # ### end Alembic commands ###

@@ -7,7 +7,7 @@ interface FreezerCapacityFieldProps {
 }
 
 /** Household freezer capacity, in number of dish portions — feeds the
- * agenda scheduler's freezer fallback (see `MealAgenda`,
+ * agenda scheduler's freezer fallback (see `MealPlanTable`,
  * `services/meal_agenda_service.py`). Blank means unlimited, the default
  * until set — there's no way to clear it back to blank once set in V1
  * (mirrors the backend Dto's documented limitation). */

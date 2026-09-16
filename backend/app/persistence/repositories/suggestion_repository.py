@@ -70,6 +70,51 @@ class SuggestionRepository:
             self._session.refresh(entity)
         return [entity.to_domain() for entity in entities]
 
+    def set_leftover_links(self, links: list[tuple[int, int, str]]) -> None:
+        """Back-fills the self-referential leftover link on already-persisted
+        `suggestion` rows, in one commit — called once per `add()` from
+        `SuggestionService`/`streaming_service.py`, right after the whole
+        batch has real ids, since the LLM only ever names its leftover
+        source by `dish_name` (see `agent/output_schema.py::PlatArgs.restes_de`),
+        before any id exists. Each tuple is `(child_id, parent_id,
+        transformation)`. Silently skips a `child_id` that doesn't match any
+        row (shouldn't happen — `resolve_leftover_links` only ever produces
+        ids drawn from the same just-persisted batch).
+        """
+        for child_id, parent_id, transformation in links:
+            entity = self._session.get(SuggestionEntity, child_id)
+            if entity is None:
+                continue
+            entity.leftover_of_suggestion_id = parent_id
+            entity.leftover_transformation = transformation
+            self._session.add(entity)
+        self._session.commit()
+
+    def update(
+        self,
+        suggestion_id: int,
+        *,
+        dish_name: str,
+        servings: int,
+        leftover_transformation: str | None,
+    ) -> Suggestion | None:
+        """Full-replace edit of a `Suggestion`'s user-facing fields — same
+        convention as `FridgeStockRepository.update()`. Backs the
+        `PATCH /api/suggestions/{suggestion_id}` table-edit endpoint
+        (`MealPlanService.update_suggestion`); re-pointing which dish this
+        one is a leftover of is out of scope here (see `SuggestionUpdateDtoIn`).
+        """
+        entity = self._session.get(SuggestionEntity, suggestion_id)
+        if entity is None:
+            return None
+        entity.dish_name = dish_name
+        entity.servings = servings
+        entity.leftover_transformation = leftover_transformation
+        self._session.add(entity)
+        self._session.commit()
+        self._session.refresh(entity)
+        return entity.to_domain()
+
     def get(self, meal_plan_id: int) -> MealPlan | None:
         entity = self._session.get(MealPlanEntity, meal_plan_id)
         if entity is None:

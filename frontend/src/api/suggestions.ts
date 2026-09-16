@@ -16,7 +16,7 @@ export interface FridgeInputPayload {
   sourcing_mode: SourcingMode;
   /** Required by the backend when `mode === "batch"` — how many days this
    * batch-cooking session should cover, sizing the idea shortlist and
-   * later the agenda (see `MealAgenda`). Ignored in `single` mode. */
+   * later the agenda (see `MealPlanTable`). Ignored in `single` mode. */
   days?: number;
   free_text?: string;
   items: FridgeInputItemPayload[];
@@ -40,9 +40,16 @@ export interface Suggestion {
   /** Estimated days this dish keeps refrigerated after cooking. */
   fridge_days: number;
   freezer_friendly: boolean;
+  /** Id of another `Suggestion` in the same plan whose leftovers this dish
+   * transforms (e.g. yesterday's pasta turned into today's gratin) — see
+   * `MealPlanTable`. `null` for a standalone dish. */
+  leftover_of_suggestion_id: number | null;
+  /** How the leftovers were transformed into this dish — set whenever
+   * `leftover_of_suggestion_id` is. */
+  leftover_transformation: string | null;
 }
 
-/** One day of a batch-cooking agenda (see `MealAgenda`) — which dish is
+/** One day of a batch-cooking agenda (see `MealPlanTable`) — which dish is
  * eaten on `day_index` (0 = the day the batch is cooked) and how it needs
  * to be stored to get there. Persisted, so present both right after
  * generation and on later `GET /api/meal-plans/{id}` reads — unlike
@@ -75,6 +82,12 @@ export interface DishIdea {
   index: number;
   dish_name: string;
   description: string;
+  /** Exact `dish_name` of another idea in this same shortlist whose
+   * leftovers this one reuses — `null` for a standalone idea. */
+  leftover_of_dish_name: string | null;
+  /** How the leftovers are turned into this dish — set whenever
+   * `leftover_of_dish_name` is. */
+  transformation_note: string | null;
 }
 
 export interface SuggestionsResult {
@@ -106,6 +119,21 @@ export function selectIdeas(
   return api.post<SuggestionsResult>(`/api/suggestions/runs/${String(runId)}/select`, {
     selected_indexes: selectedIndexes,
   });
+}
+
+export interface SuggestionUpdateInput {
+  dish_name: string;
+  servings: number;
+  leftover_transformation: string | null;
+}
+
+/** Backs the meal-plan table's inline edit — full-replace of the editable
+ * fields, same convention as `updateFridgeStockItem`. */
+export function updateSuggestion(
+  id: number,
+  input: SuggestionUpdateInput,
+): Promise<Suggestion> {
+  return api.patch<Suggestion>(`/api/suggestions/${String(id)}`, input);
 }
 
 /* ------------------------------------------------------------------ */

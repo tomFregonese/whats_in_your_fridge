@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 
 from openai.types.chat import ChatCompletionMessageParam
 
-from app.agent import loop
+from app.agent import loop, prompts
 from app.agent.dedup import DedupProvider
 from app.agent.loop import IdeasLoopResult, LoopResult
 from app.domain.agent_run import AgentRun, AgentRunPhase, AgentRunStatus
@@ -49,6 +49,7 @@ from app.services.exceptions import NotFoundError
 from app.services.fridge_stock_service import FridgeStockService
 from app.services.meal_agenda_service import DishForAgenda, build_agenda
 from app.services.settings_service import SettingsService
+from app.services.suggestion_service import apply_leftover_links, resolve_leftover_links
 
 # Per-run in-memory state — keyed by the streaming run id.
 _buffers: dict[int, queue.Queue[dict[str, object]]] = {}
@@ -81,7 +82,17 @@ def _cleanup(run_id: int) -> None:
 
 
 def _encode_ideas_json(ideas: list[DishIdea]) -> str:
-    return json.dumps([{"dish_name": i.dish_name, "description": i.description} for i in ideas])
+    return json.dumps(
+        [
+            {
+                "dish_name": i.dish_name,
+                "description": i.description,
+                "leftover_of_dish_name": i.leftover_of_dish_name,
+                "transformation_note": i.transformation_note,
+            }
+            for i in ideas
+        ]
+    )
 
 
 def _stock_item_to_dict(item: FridgeStockItem) -> dict[str, object]:
@@ -291,11 +302,7 @@ def start_background(
                     selected_dish_names = [idea.dish_name for idea in selected]
 
                     tool_call_id = loop.pending_tool_call_id(phase_result.messages)
-                    names = ", ".join(f'"{n}"' for n in selected_dish_names)
-                    content = (
-                        f"The user selected: {names}. Call `proposer_plats` now with the "
-                        "full recipe for exactly these dishes, in this order, and no others."
-                    )
+                    content = prompts.build_selection_message(selected)
                     current_messages = list(phase_result.messages)
                     current_messages.append(loop.build_tool_result_message(tool_call_id, content))
                     phase = AgentRunPhase.RECIPES
@@ -326,6 +333,15 @@ def start_background(
                     )
                 )
 
+                leftover_links = resolve_leftover_links(
+                    saved_meal_plan.suggestions, phase_result.leftover_links
+                )
+                if leftover_links:
+                    suggestion_repository.set_leftover_links(leftover_links)
+                    saved_meal_plan.suggestions = apply_leftover_links(
+                        saved_meal_plan.suggestions, leftover_links
+                    )
+
                 used_stock_ids = sorted(
                     {
                         stock_id
@@ -345,8 +361,10 @@ def start_background(
                         dishes=[
                             DishForAgenda(
                                 suggestion_id=s.id,
+                                dish_name=s.dish_name,
                                 fridge_days=s.fridge_days,
                                 freezer_friendly=s.freezer_friendly,
+                                leftover_of_suggestion_id=s.leftover_of_suggestion_id,
                             )
                             for s in saved_meal_plan.suggestions
                             if s.id is not None

@@ -19,7 +19,7 @@ same plan via `GET /api/meal-plans/{id}`.
 """
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 
 from openai.types.chat import ChatCompletionMessageParam
@@ -73,6 +73,57 @@ class CompletedOutcome:
 
 
 SuggestionOutcome = ClarificationOutcome | IdeasOutcome | CompletedOutcome
+
+
+def resolve_leftover_links(
+    suggestions: list[Suggestion], links: list[loop.LeftoverLink]
+) -> list[tuple[int, int, str]]:
+    """Resolves the RECIPES phase's by-name leftover references
+    (`loop.LeftoverLink`, built from `PlatArgs.restes_de`/`transformation`)
+    into `(child_id, parent_id, transformation)` triples, once `suggestions`
+    carries real, persisted ids — shared by `SuggestionService` (non
+    streaming) and `streaming_service.py` (streaming), which both persist a
+    `MealPlan` the same way.
+
+    Silently drops anything that doesn't resolve to a distinct pair of
+    dishes in this same batch (unknown name, self-reference) rather than
+    raising — a `:free` model's leftover link is a nice-to-have annotation,
+    never something worth failing a whole generation over. Cycles across
+    more than two dishes are not detected here (two independent nullable
+    FKs are harmless at this layer) — see `services/meal_agenda_service.py`,
+    the one place that actually walks the chain.
+    """
+    id_by_name = {s.dish_name.strip().casefold(): s.id for s in suggestions}
+    resolved: list[tuple[int, int, str]] = []
+    for link in links:
+        child_id = id_by_name.get(link.dish_name.strip().casefold())
+        parent_id = id_by_name.get(link.leftover_of_dish_name.strip().casefold())
+        if child_id is None or parent_id is None or child_id == parent_id:
+            continue
+        resolved.append((child_id, parent_id, link.transformation))
+    return resolved
+
+
+def apply_leftover_links(
+    suggestions: list[Suggestion], links: list[tuple[int, int, str]]
+) -> list[Suggestion]:
+    """Reflects `resolve_leftover_links`'s resolved links onto in-memory
+    `Suggestion` objects — called right after `SuggestionRepository.
+    set_leftover_links` persists them, so the outcome/event this
+    generation returns is accurate without a re-read.
+    """
+    parent_by_child_id = {child_id: parent_id for child_id, parent_id, _ in links}
+    transformation_by_child_id = {child_id: note for child_id, _, note in links}
+    return [
+        replace(
+            s,
+            leftover_of_suggestion_id=parent_by_child_id[s.id],
+            leftover_transformation=transformation_by_child_id[s.id],
+        )
+        if s.id is not None and s.id in parent_by_child_id
+        else s
+        for s in suggestions
+    ]
 
 
 class SuggestionService:
@@ -172,11 +223,7 @@ class SuggestionService:
 
         messages = loop.deserialize_messages(agent_run.messages_json)
         tool_call_id = loop.pending_tool_call_id(messages)
-        names = ", ".join(f'"{idea.dish_name}"' for idea in selected)
-        content = (
-            f"The user selected: {names}. Call `proposer_plats` now with the full recipe "
-            "for exactly these dishes, in this order, and no others."
-        )
+        content = prompts.build_selection_message(selected)
         messages.append(loop.build_tool_result_message(tool_call_id, content))
 
         outcome = self._run_recipes_phase(
@@ -305,6 +352,13 @@ class SuggestionService:
         )
         assert saved_meal_plan.id is not None
 
+        leftover_links = resolve_leftover_links(saved_meal_plan.suggestions, result.leftover_links)
+        if leftover_links:
+            self._suggestion_repository.set_leftover_links(leftover_links)
+            saved_meal_plan.suggestions = apply_leftover_links(
+                saved_meal_plan.suggestions, leftover_links
+            )
+
         used_stock_ids = sorted(
             {
                 stock_id
@@ -323,8 +377,10 @@ class SuggestionService:
                 dishes=[
                     DishForAgenda(
                         suggestion_id=s.id,
+                        dish_name=s.dish_name,
                         fridge_days=s.fridge_days,
                         freezer_friendly=s.freezer_friendly,
+                        leftover_of_suggestion_id=s.leftover_of_suggestion_id,
                     )
                     for s in saved_meal_plan.suggestions
                     if s.id is not None
@@ -357,7 +413,15 @@ class SuggestionService:
     @staticmethod
     def _encode_ideas(ideas: list[DishIdea]) -> str:
         return json.dumps(
-            [{"dish_name": idea.dish_name, "description": idea.description} for idea in ideas]
+            [
+                {
+                    "dish_name": idea.dish_name,
+                    "description": idea.description,
+                    "leftover_of_dish_name": idea.leftover_of_dish_name,
+                    "transformation_note": idea.transformation_note,
+                }
+                for idea in ideas
+            ]
         )
 
     @staticmethod
@@ -365,6 +429,11 @@ class SuggestionService:
         if raw is None:
             return []
         return [
-            DishIdea(dish_name=item["dish_name"], description=item["description"])
+            DishIdea(
+                dish_name=item["dish_name"],
+                description=item["description"],
+                leftover_of_dish_name=item.get("leftover_of_dish_name"),
+                transformation_note=item.get("transformation_note"),
+            )
             for item in json.loads(raw)
         ]
