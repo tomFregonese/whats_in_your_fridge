@@ -88,6 +88,29 @@
   flex-shrink: 0;
 }
 
+.cook-run-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 42rem;
+  margin: var(--space-4) auto 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.cook-run-banner:hover {
+  opacity: 0.85;
+}
+
+.cook-run-banner-icon {
+  flex-shrink: 0;
+}
+
 /* ---------- Page header ---------- */
 
 .page-header {
@@ -1021,6 +1044,31 @@ textarea:focus {
   animation-delay: 0.4s;
 }
 
+.reasoning-expand-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.reasoning-expand-btn:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.reasoning-dots + .reasoning-expand-btn {
+  margin-left: var(--space-1);
+}
+
 @keyframes reasoning-bounce {
   0%, 80%, 100% {
     opacity: 0.3;
@@ -1047,6 +1095,60 @@ textarea:focus {
 .reasoning-cursor {
   animation: reasoning-blink 1s step-end infinite;
   color: var(--color-primary);
+}
+
+.reasoning-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: rgba(15, 23, 42, 0);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 240ms ease,
+    background-color 240ms ease,
+    visibility 0s linear 240ms;
+}
+
+.reasoning-overlay.open {
+  background: rgba(15, 23, 42, 0.55);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 240ms ease,
+    background-color 240ms ease,
+    visibility 0s linear 0s;
+}
+
+.reasoning-overlay-panel {
+  width: 100%;
+  max-width: 44rem;
+  max-height: min(80vh, 44rem);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  transform: scale(0.94) translateY(10px);
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reasoning-overlay.open .reasoning-overlay-panel {
+  transform: scale(1) translateY(0);
+}
+
+.reasoning-content-overlay {
+  flex: 1;
+  max-height: none;
+  font-size: 0.9rem;
 }
 
 @keyframes reasoning-blink {
@@ -1176,7 +1278,8 @@ textarea:focus {
   }
 
   .app-header,
-  .model-status-banner {
+  .model-status-banner,
+  .cook-run-banner {
     display: none !important;
   }
 
