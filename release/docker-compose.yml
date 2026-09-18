@@ -1,0 +1,45 @@
+services:
+  api:
+    image: ghcr.io/tomfregonese/whats_in_your_fridge/api:${APP_VERSION:-latest}
+    environment:
+      DB_PATH: /data/fridge.db
+      HISTORY_WINDOW_N: ${HISTORY_WINDOW_N:-10}
+      STT_URL: http://stt:8001
+      NLP_URL: http://nlp:8002
+    volumes:
+      - ./data:/data
+    depends_on:
+      stt:
+        condition: service_healthy
+      nlp:
+        condition: service_healthy
+    restart: unless-stopped
+    # No `ports:` here on purpose — the API is reachable only from the
+    # `frontend` service over Docker's internal network.
+
+  stt:
+    image: ghcr.io/tomfregonese/whats_in_your_fridge/stt:${APP_VERSION:-latest}
+    restart: unless-stopped
+    # Local speech-to-text for voice dictation — audio never leaves the
+    # machine. Reachable only from `api`, same "no `ports:`" convention as
+    # `api` itself.
+
+  nlp:
+    image: ghcr.io/tomfregonese/whats_in_your_fridge/nlp:${APP_VERSION:-latest}
+    restart: unless-stopped
+    # Local text-structuring for voice dictation — a small
+    # grammar-constrained local model turns a dictated transcript into
+    # structured ingredient/quantity rows, so this feature needs no
+    # OpenRouter token or internet access. Reachable only from `api`, same
+    # "no `ports:`" convention as `stt`.
+
+  frontend:
+    image: ghcr.io/tomfregonese/whats_in_your_fridge/frontend:${APP_VERSION:-latest}
+    ports:
+      # Bound to 127.0.0.1 explicitly, never 0.0.0.0 — this app must never
+      # be reachable from the network, only from the machine it runs on.
+      - "127.0.0.1:${APP_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

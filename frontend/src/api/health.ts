@@ -1,5 +1,6 @@
 export interface HealthStatus {
   status: string;
+  version: string;
 }
 
 export async function getHealth(): Promise<HealthStatus> {

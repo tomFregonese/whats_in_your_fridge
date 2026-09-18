@@ -1,5 +1,12 @@
 FROM python:3.12-slim
 
+# Set by the tag-triggered release workflow to the git tag being built (see
+# .github/workflows/docker-build.yml) — reported by /api/health and compared
+# against GitHub's latest release by the frontend's update-check banner.
+# Local/dev builds never pass this, so it stays "dev".
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*

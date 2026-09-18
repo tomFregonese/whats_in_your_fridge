@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { CookRunBanner } from "./CookRunBanner";
 import { ModelStatusBanner } from "./ModelStatusBanner";
+import { UpdateAvailableBanner } from "./UpdateAvailableBanner";
 
 /** Persistent header + nav wrapping every screen behind `AppGate` (Home,
  * Settings, and whatever gets added in later milestones). Onboarding and
@@ -28,6 +29,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </nav>
         </div>
       </header>
+      <UpdateAvailableBanner />
       <ModelStatusBanner />
       <CookRunBanner />
       <main className="app-content">{children}</main>

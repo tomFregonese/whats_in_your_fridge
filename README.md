@@ -5,8 +5,33 @@ remembers past suggestions to keep things varied, and collects feedback after ea
 (liked/disliked, why).
 
 100% local: no network exposure, no running cost for the household (OpenRouter `:free` models).
+One exception: the app makes a single outbound, read-only check against GitHub's public release
+list to show a "new version available" banner — nothing else ever leaves the machine.
 
-## Running the app
+## Just want to try it?
+
+No need to clone this repository or install anything beyond Docker — this only ever runs
+prebuilt images pulled from GitHub's container registry (GHCR), never builds anything, and needs
+no developer tools.
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) if you don't have it
+   yet, and make sure it's running.
+2. Go to the [Releases page](https://github.com/tomFregonese/whats_in_your_fridge/releases),
+   download the latest `whats-in-your-fridge-vX.Y.Z.zip`, and unzip it.
+3. Double-click `run.command` (macOS) or `run.bat` (Windows) — or run `run.sh` from a terminal on
+   Linux. macOS note: the first double-click will likely be blocked as "from an unidentified
+   developer" — right-click the file, choose "Open", confirm once, and it works from then on.
+4. Wait — a browser window opens automatically at `http://127.0.0.1:8080` once the app is ready.
+5. To close it, double-click `stop.command` / `stop.bat` (or run `stop.sh`). Your data is untouched
+   either way.
+
+When the app shows a "new version available" banner, just re-run `run.command`/`run.bat`/`run.sh`
+— it pulls the new version and restarts.
+
+## Running from source (development)
+
+Requires cloning this repository — most people should use
+[Just want to try it?](#just-want-to-try-it) above instead.
 
 Requirement: Docker + Docker Compose, running — [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 is the easiest way to get both (Mac/Windows/Linux); [Colima](https://github.com/abiosoft/colima) +

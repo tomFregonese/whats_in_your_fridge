@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # Same, for the local dictation-structuring service (see
     # `docker-compose.yml`'s `nlp` service).
     nlp_url: str = "http://nlp:8002"
+    # Baked into the image at build time (see backend/Dockerfile's
+    # ARG/ENV) — "dev" here only means running outside a built image, e.g.
+    # local `uvicorn` during development or in tests.
+    app_version: str = "dev"
 
 
 settings = Settings()
