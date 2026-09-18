@@ -5,7 +5,11 @@ FROM python:3.12-slim
 # on Apple Silicon) — build tooling is installed unconditionally so
 # `pip install` below always succeeds, compiling from source when no
 # prebuilt wheel matches, at the cost of a slower first build.
+# `upgrade` pulls in any Debian security patches released since this
+# base image was built — otherwise the image stays pinned to whatever was
+# current the day python:3.12-slim was last published.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends build-essential cmake git \
     && rm -rf /var/lib/apt/lists/*
 

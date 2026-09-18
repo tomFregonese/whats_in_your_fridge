@@ -7,7 +7,11 @@ FROM python:3.12-slim
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
 
+# `upgrade` pulls in any Debian security patches released since this
+# base image was built — otherwise the image stays pinned to whatever was
+# current the day python:3.12-slim was last published.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 

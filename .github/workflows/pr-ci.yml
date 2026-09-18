@@ -77,6 +77,11 @@ jobs:
       # Filesystem scan at repo root auto-discovers all manifests
       # (backend/pyproject.toml, frontend/package-lock.json,
       # stt/requirements.txt, nlp/requirements.txt) in one pass.
+      #
+      # ignore-unfixed: a CVE with no fix published yet by the upstream
+      # maintainer can't be acted on no matter how the gate is set — failing
+      # on it forever just trains everyone to ignore red CI. Only a CVE we
+      # could actually resolve (by bumping a dependency) fails the build.
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -84,4 +89,5 @@ jobs:
           scan-ref: '.'
           scanners: 'vuln'
           severity: 'CRITICAL,HIGH'
+          ignore-unfixed: 'true'
           exit-code: '1'

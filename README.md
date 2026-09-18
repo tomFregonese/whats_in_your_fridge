@@ -16,8 +16,9 @@ no developer tools.
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) if you don't have it
    yet, and make sure it's running.
-2. Go to the [Releases page](https://github.com/tomFregonese/whats_in_your_fridge/releases),
-   download the latest `whats-in-your-fridge-vX.Y.Z.zip`, and unzip it.
+2. Download
+   [whats-in-your-fridge.zip](https://github.com/tomFregonese/whats_in_your_fridge/releases/latest/download/whats-in-your-fridge.zip)
+   (always the latest version) and unzip it.
 3. Double-click `run.command` (macOS) or `run.bat` (Windows) — or run `run.sh` from a terminal on
    Linux. macOS note: the first double-click will likely be blocked as "from an unidentified
    developer" — right-click the file, choose "Open", confirm once, and it works from then on.

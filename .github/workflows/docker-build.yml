@@ -100,11 +100,17 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}-${{ env.PLATFORM_SLUG }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}-${{ env.PLATFORM_SLUG }}
 
+      # ignore-unfixed: a CVE with no fix published yet by the upstream
+      # maintainer (Debian/Alpine/PyPI) can't be acted on no matter how the
+      # gate is set — failing on it forever just blocks every release
+      # indefinitely. Only a CVE we could actually resolve (bump a base
+      # image or a dependency) fails the build.
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_BASE }}/${{ matrix.service }}@${{ steps.build.outputs.digest }}
           severity: 'CRITICAL,HIGH'
+          ignore-unfixed: 'true'
           exit-code: '1'
         env:
           TRIVY_USERNAME: ${{ github.actor }}
@@ -256,16 +262,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # Constant filename on purpose (not versioned) — this is what makes
+      # GitHub's stable alias URL work:
+      #   .../releases/latest/download/whats-in-your-fridge.zip
+      # That link always resolves to whichever release is currently
+      # "latest" and downloads the asset directly, no repo page, no
+      # browsing Releases, no git — just like clicking a download button
+      # on any normal website. Sharing that one URL with a non-technical
+      # friend is the whole point; a versioned filename would break it on
+      # every new release.
       - name: Build release package
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          (cd release && zip -r "../whats-in-your-fridge-${TAG}.zip" .)
+          (cd release && zip -r "../whats-in-your-fridge.zip" .)
 
       - name: Create GitHub Release with the package attached
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          gh release create "${TAG}" "whats-in-your-fridge-${TAG}.zip" \
+          gh release create "${TAG}" "whats-in-your-fridge.zip" \
             --title "${TAG}" \
             --generate-notes

@@ -1,5 +1,12 @@
 FROM python:3.12-slim
 
+# `upgrade` pulls in any Debian security patches released since this
+# base image was built — otherwise the image stays pinned to whatever was
+# current the day python:3.12-slim was last published.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt ./
