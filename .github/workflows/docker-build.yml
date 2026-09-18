@@ -87,6 +87,17 @@ jobs:
       # frontend's update-check banner compares against GitHub's latest
       # release). An empty/unused build-arg on the other 3 services is a
       # harmless BuildKit warning, not a failure.
+      # provenance/sbom: false — build-push-action@v6 defaults to generating
+      # a provenance attestation, which wraps even a single-platform push
+      # in a multi-child OCI index (the real image + an attestation
+      # "child"). Trivy's remote image fetch then defaults to looking for a
+      # linux/amd64 child in that index — which doesn't exist on an
+      # arm64-only digest — and fails with "no child with platform
+      # linux/amd64 in index" on every arm64 leg, regardless of actual
+      # vulnerabilities. We never generate or consume provenance/SBOM
+      # anywhere in this pipeline, so there's nothing lost by turning it
+      # off — it just keeps this intermediate per-arch digest a plain
+      # single-platform image manifest.
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
@@ -94,6 +105,8 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           platforms: ${{ matrix.platform }}
+          provenance: false
+          sbom: false
           build-args: |
             APP_VERSION=${{ matrix.service == 'api' && github.ref_name || '' }}
           outputs: type=image,name=${{ env.IMAGE_BASE }}/${{ matrix.service }},push-by-digest=true,name-canonical=true,push=true
